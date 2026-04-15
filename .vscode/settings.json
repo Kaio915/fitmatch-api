@@ -1,0 +1,16 @@
+{
+  "java.configuration.runtimes": [
+    {
+      "name": "JavaSE-17",
+      "path": "D:\\Download\\jdk-17.0.15",
+      "default": true
+    }
+  ],
+  "java.import.maven.enabled": true,
+  "java.configuration.updateBuildConfiguration": "automatic",
+  "java.project.sourcePaths": [
+    "src/main/java",
+    "src/test/java"
+  ],
+  "java.project.outputPath": "target/classes"
+}

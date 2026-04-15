@@ -1,0 +1,17 @@
+# ===== JAVA / MAVEN =====
+target/
+build/
+*.class
+*.jar
+
+# ===== LOGS =====
+*.log
+backend_log
+
+# ===== IDE =====
+.vscode/
+.idea/
+
+# ===== ARQUIVOS SENSÍVEIS =====
+.env
+application.properties

@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Spring Boot API (Debug)",
+      "request": "launch",
+      "preLaunchTask": "Kill process on 8080",
+      "mainClass": "fitmatch_api.FitmatchApplication",
+      "cwd": "${workspaceFolder:fitmatch_api}",
+      "projectName": "fitmatch",
+      "console": "integratedTerminal",
+      "env": {
+        "SPRING_JACKSON_SERIALIZATION_WRITE_DATES_AS_TIMESTAMPS": null,
+        "EDAMAM_ACCOUNT_USER": "fitmatch-local"
+      },
+      "vmArgs": "-Dspring.output.ansi.enabled=always"
+    }
+  ]
+}
