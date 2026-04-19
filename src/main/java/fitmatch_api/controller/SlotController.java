@@ -49,6 +49,13 @@ public class SlotController {
             String dayName = decodeDayName(storedDay);
             String dateIso = decodeDateIso(storedDay);
             String repeatMode = dateIso.isEmpty() ? "WEEKLY" : "ONCE";
+            String state = slot.getState() == null ? "" : slot.getState().trim().toUpperCase(Locale.ROOT);
+
+            // Compatibilidade: ignora REQUEST legado sem data, pois ele gera
+            // bloqueio recorrente indevido em semanas futuras.
+            if ("REQUEST".equals(state) && dateIso.isEmpty()) {
+                continue;
+            }
 
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", slot.getId());

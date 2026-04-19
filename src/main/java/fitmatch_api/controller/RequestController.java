@@ -23,6 +23,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -84,12 +85,14 @@ public class RequestController {
             String dayName = extractJsonField(objectText, "dayName").trim();
             String time = extractJsonField(objectText, "time").trim();
             String dateIso = normalizeDateIso(extractJsonField(objectText, "dateIso"));
+            String dateLabel = extractJsonField(objectText, "dateLabel").trim();
 
             if (!dayName.isEmpty() && !time.isEmpty()) {
                 java.util.HashMap<String, String> slot = new java.util.HashMap<>();
                 slot.put("dayName", dayName);
                 slot.put("time", time);
                 slot.put("dateIso", dateIso);
+                slot.put("dateLabel", dateLabel);
                 slots.add(slot);
             }
         }
@@ -107,6 +110,7 @@ public class RequestController {
                 slot.put("dayName", dayName);
                 slot.put("time", time);
                 slot.put("dateIso", "");
+                slot.put("dateLabel", "");
                 slots.add(slot);
             }
         }
@@ -120,6 +124,7 @@ public class RequestController {
                 slot.put("dayName", dayName);
                 slot.put("time", time);
                 slot.put("dateIso", "");
+                slot.put("dateLabel", "");
                 slots.add(slot);
             }
         }
@@ -133,6 +138,7 @@ public class RequestController {
                 slot.put("dayName", dayName);
                 slot.put("time", time);
                 slot.put("dateIso", "");
+                slot.put("dateLabel", "");
                 slots.add(slot);
             }
         }
@@ -146,6 +152,7 @@ public class RequestController {
                 slot.put("dayName", dayName);
                 slot.put("time", time);
                 slot.put("dateIso", "");
+                slot.put("dateLabel", "");
                 slots.add(slot);
             }
         }
@@ -259,6 +266,12 @@ public class RequestController {
                     : blockedSlot.getState().trim().toUpperCase(Locale.ROOT);
 
             String blockedDayRaw = blockedSlot.getDayName();
+            if ("REQUEST".equals(blockedState) && !isManualOnceStoredDay(blockedDayRaw)) {
+                // Compatibilidade com dados antigos: REQUEST recorrente sem data.
+                // Slots de request semanal devem ser tratados por data (ONCE).
+                continue;
+            }
+
             if (isManualOnceStoredDay(blockedDayRaw)) {
                 String blockedDateIso = decodeManualOnceDateIso(blockedDayRaw);
                 String blockedDay = normalizeDayName(decodeManualOnceDayName(blockedDayRaw));
@@ -357,6 +370,39 @@ public class RequestController {
             return null;
         }
 
+        LocalDateTime fromMetadata = resolveSlotStartAtFromMetadata(slot, anchor);
+        if (fromMetadata != null) {
+            return fromMetadata;
+        }
+
+        DayOfWeek weekday = weekdayFromPt(slot.getOrDefault("dayName", ""));
+        int[] hm = parseHourMinute(slot.getOrDefault("time", ""));
+        if (weekday == null || hm == null) {
+            return null;
+        }
+
+        LocalDateTime candidate = nextOccurrence(anchor, weekday, hm[0], hm[1]);
+        if (weekday.getValue() == anchor.getDayOfWeek().getValue()) {
+            LocalDateTime sameDayScheduled = LocalDateTime.of(
+                    anchor.getYear(),
+                    anchor.getMonthValue(),
+                    anchor.getDayOfMonth(),
+                    hm[0],
+                    hm[1]
+            );
+            if (sameDayScheduled.isBefore(anchor)) {
+                candidate = sameDayScheduled;
+            }
+        }
+
+        return candidate;
+    }
+
+    private LocalDateTime resolveSlotStartAtFromMetadata(Map<String, String> slot, LocalDateTime anchor) {
+        if (slot == null) {
+            return null;
+        }
+
         DayOfWeek weekday = weekdayFromPt(slot.getOrDefault("dayName", ""));
         int[] hm = parseHourMinute(slot.getOrDefault("time", ""));
         if (weekday == null || hm == null) {
@@ -379,21 +425,207 @@ public class RequestController {
             }
         }
 
-        LocalDateTime candidate = nextOccurrence(anchor, weekday, hm[0], hm[1]);
-        if (weekday.getValue() == anchor.getDayOfWeek().getValue()) {
-            LocalDateTime sameDayScheduled = LocalDateTime.of(
-                    anchor.getYear(),
-                    anchor.getMonthValue(),
-                    anchor.getDayOfMonth(),
-                    hm[0],
-                    hm[1]
-            );
-            if (sameDayScheduled.isBefore(anchor)) {
-                candidate = sameDayScheduled;
+        String dateLabel = slot.getOrDefault("dateLabel", "").trim();
+        Matcher fullLabel = Pattern.compile("^(\\d{2})/(\\d{2})/(\\d{4})$").matcher(dateLabel);
+        if (fullLabel.find()) {
+            try {
+                int day = Integer.parseInt(fullLabel.group(1));
+                int month = Integer.parseInt(fullLabel.group(2));
+                int year = Integer.parseInt(fullLabel.group(3));
+                return LocalDateTime.of(year, month, day, hm[0], hm[1]);
+            } catch (RuntimeException ignored) {
+                // Ignora dateLabel inválido e segue para o fallback por recorrência.
             }
         }
 
-        return candidate;
+        Matcher shortLabel = Pattern.compile("^(\\d{2})/(\\d{2})$").matcher(dateLabel);
+        if (shortLabel.find()) {
+            try {
+                int day = Integer.parseInt(shortLabel.group(1));
+                int month = Integer.parseInt(shortLabel.group(2));
+                return LocalDateTime.of(anchor.getYear(), month, day, hm[0], hm[1]);
+            } catch (RuntimeException ignored) {
+                // Ignora dateLabel inválido e segue para o fallback por recorrência.
+            }
+        }
+
+        return null;
+    }
+
+    private LocalDateTime resolveWeeklySlotStartAtForStorage(Map<String, String> slot, LocalDateTime anchor) {
+        LocalDateTime fromMetadata = resolveSlotStartAtFromMetadata(slot, anchor);
+        if (fromMetadata != null) {
+            return fromMetadata;
+        }
+
+        DayOfWeek weekday = weekdayFromPt(slot.getOrDefault("dayName", ""));
+        int[] hm = parseHourMinute(slot.getOrDefault("time", ""));
+        if (weekday == null || hm == null) {
+            return null;
+        }
+
+        LocalDate weekStart = anchor.toLocalDate().minusDays(anchor.getDayOfWeek().getValue() - 1L);
+        LocalDate targetDate = weekStart.plusDays(weekday.getValue() - 1L);
+        return LocalDateTime.of(targetDate, LocalTime.of(hm[0], hm[1]));
+    }
+
+    private String formatDateLabel(LocalDate date) {
+        String dd = String.format(Locale.ROOT, "%02d", date.getDayOfMonth());
+        String mm = String.format(Locale.ROOT, "%02d", date.getMonthValue());
+        return dd + "/" + mm;
+    }
+
+    private List<Map<String, String>> normalizeSlotsForPersistence(
+            List<Map<String, String>> selectedSlots,
+            String planType,
+            LocalDateTime anchor
+    ) {
+        List<Map<String, String>> normalized = new ArrayList<>();
+        if (selectedSlots == null) {
+            return normalized;
+        }
+
+        boolean weeklyPlan = "SEMANAL".equals(planType);
+        for (Map<String, String> slot : selectedSlots) {
+            String dayName = slot.getOrDefault("dayName", "").trim();
+            String time = slot.getOrDefault("time", "").trim();
+            if (dayName.isEmpty() || time.isEmpty()) {
+                continue;
+            }
+
+            String dateIso = normalizeDateIso(slot.getOrDefault("dateIso", ""));
+            String dateLabel = slot.getOrDefault("dateLabel", "").trim();
+
+            if (weeklyPlan && dateIso.isBlank()) {
+                LocalDateTime slotStart = resolveWeeklySlotStartAtForStorage(slot, anchor);
+                if (slotStart != null) {
+                    dateIso = slotStart.toLocalDate().toString();
+                }
+            }
+
+            if (dateLabel.isBlank() && !dateIso.isBlank()) {
+                try {
+                    dateLabel = formatDateLabel(LocalDate.parse(dateIso));
+                } catch (DateTimeParseException ignored) {
+                    dateLabel = "";
+                }
+            }
+
+            LinkedHashMap<String, String> normalizedSlot = new LinkedHashMap<>();
+            normalizedSlot.put("dayName", dayName);
+            normalizedSlot.put("time", time);
+            normalizedSlot.put("dateIso", dateIso);
+            normalizedSlot.put("dateLabel", dateLabel);
+            normalized.add(normalizedSlot);
+        }
+
+        return normalized;
+    }
+
+    private String jsonEscape(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        StringBuilder escaped = new StringBuilder(value.length() + 16);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"':
+                    escaped.append("\\\"");
+                    break;
+                case '\\':
+                    escaped.append("\\\\");
+                    break;
+                case '\b':
+                    escaped.append("\\b");
+                    break;
+                case '\f':
+                    escaped.append("\\f");
+                    break;
+                case '\n':
+                    escaped.append("\\n");
+                    break;
+                case '\r':
+                    escaped.append("\\r");
+                    break;
+                case '\t':
+                    escaped.append("\\t");
+                    break;
+                default:
+                    if (c < 0x20) {
+                        escaped.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        escaped.append(c);
+                    }
+                    break;
+            }
+        }
+        return escaped.toString();
+    }
+
+    private String serializeSlotsJson(List<Map<String, String>> slots) {
+        StringBuilder json = new StringBuilder();
+        json.append('[');
+
+        for (int i = 0; i < slots.size(); i++) {
+            Map<String, String> slot = slots.get(i);
+            if (i > 0) {
+                json.append(',');
+            }
+
+            json.append('{')
+                .append("\"dayName\":\"")
+                .append(jsonEscape(slot.getOrDefault("dayName", "")))
+                .append("\",")
+                .append("\"time\":\"")
+                .append(jsonEscape(slot.getOrDefault("time", "")))
+                .append("\",")
+                .append("\"dateIso\":\"")
+                .append(jsonEscape(slot.getOrDefault("dateIso", "")))
+                .append("\",")
+                .append("\"dateLabel\":\"")
+                .append(jsonEscape(slot.getOrDefault("dateLabel", "")))
+                .append("\"}");
+        }
+
+        json.append(']');
+        return json.toString();
+    }
+
+    private void normalizeLegacyWeeklyRequests(List<StudentRequest> requests) {
+        if (requests == null || requests.isEmpty()) {
+            return;
+        }
+
+        List<StudentRequest> changed = new ArrayList<>();
+        for (StudentRequest req : requests) {
+            String planType = normalizePlanType(req.getPlanType());
+            if (!"SEMANAL".equals(planType)) {
+                continue;
+            }
+
+            LocalDateTime anchor = req.getCreatedAt() != null ? req.getCreatedAt() : LocalDateTime.now();
+            List<Map<String, String>> normalizedSlots = normalizeSlotsForPersistence(
+                    extractSelectedSlots(req),
+                    planType,
+                    anchor
+            );
+            if (normalizedSlots.isEmpty()) {
+                continue;
+            }
+
+            String normalizedJson = serializeSlotsJson(normalizedSlots);
+            String currentJson = req.getDaysJson() == null ? "" : req.getDaysJson().trim();
+            if (!normalizedJson.equals(currentJson)) {
+                req.setDaysJson(normalizedJson);
+                changed.add(req);
+            }
+        }
+
+        if (!changed.isEmpty()) {
+            requestRepo.saveAll(changed);
+        }
     }
 
     private LocalDateTime resolvePlanWindowEnd(LocalDateTime anchor, String planType) {
@@ -666,6 +898,7 @@ public class RequestController {
             slot.put("dayName", dto.dayName());
             slot.put("time", dto.time());
             slot.put("dateIso", "");
+            slot.put("dateLabel", "");
             slots.add(slot);
         }
         return slots;
@@ -690,6 +923,7 @@ public class RequestController {
                 slot.put("dayName", dayName);
                 slot.put("time", time);
                 slot.put("dateIso", "");
+                slot.put("dateLabel", "");
                 slots.add(slot);
             }
         }
@@ -701,6 +935,34 @@ public class RequestController {
             return false;
         }
         return "SEMANAL".equalsIgnoreCase(req.getPlanType().trim());
+    }
+
+    private String buildStoredOnceDay(String dayName, String dateIso) {
+        return MANUAL_ONCE_PREFIX + dateIso + MANUAL_ONCE_SEPARATOR + dayName;
+    }
+
+    private String requestStoredDay(StudentRequest req, Map<String, String> slot) {
+        String dayName = slot.getOrDefault("dayName", "").trim();
+        if (dayName.isEmpty() || req == null || !shouldPersistRequestSlot(req)) {
+            return dayName;
+        }
+
+        String dateIso = normalizeDateIso(slot.getOrDefault("dateIso", ""));
+        if (dateIso.isBlank()) {
+            LocalDateTime anchor = req.getCreatedAt() != null
+                    ? req.getCreatedAt()
+                    : (req.getApprovedAt() != null ? req.getApprovedAt() : LocalDateTime.now());
+            LocalDateTime slotStart = resolveWeeklySlotStartAtForStorage(slot, anchor);
+            if (slotStart != null) {
+                dateIso = slotStart.toLocalDate().toString();
+            }
+        }
+
+        if (dateIso.isBlank()) {
+            return dayName;
+        }
+
+        return buildStoredOnceDay(dayName, dateIso);
     }
 
     private boolean hasStudentScheduleConflict(Long studentId, List<Map<String, String>> selectedSlots) {
@@ -766,18 +1028,26 @@ public class RequestController {
             LocalDate.now().atStartOfDay()
         );
         validateSelectedSlotsByPlanWindow(selectedSlots, normalizedPlanType, requestAnchor);
+        List<Map<String, String>> slotsForPersistence = normalizeSlotsForPersistence(
+                selectedSlots,
+                normalizedPlanType,
+                requestAnchor
+        );
+        if (slotsForPersistence.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Horário selecionado inválido");
+        }
 
         if (blockedStudentRepo.existsByTrainerIdAndStudentId(dto.trainerId(), dto.studentId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Este personal bloqueou novas solicitações deste aluno");
         }
 
-        if (hasStudentScheduleConflict(dto.studentId(), selectedSlots)) {
+        if (hasStudentScheduleConflict(dto.studentId(), slotsForPersistence)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Você já possui solicitação/plano ativo neste horário com outro personal");
         }
 
-        for (Map<String, String> slot : selectedSlots) {
+        for (Map<String, String> slot : slotsForPersistence) {
             String dayName = slot.getOrDefault("dayName", "").trim();
             String time = slot.getOrDefault("time", "").trim();
             if (dayName.isEmpty() || time.isEmpty()) {
@@ -791,20 +1061,27 @@ public class RequestController {
             }
         }
 
+        Map<String, String> firstSlot = slotsForPersistence.get(0);
         StudentRequest req = new StudentRequest();
         req.setTrainerId(dto.trainerId());
         req.setStudentId(dto.studentId());
         req.setStudentName(dto.studentName() != null ? dto.studentName() : "Aluno");
         req.setTrainerName(dto.trainerName() != null ? dto.trainerName() : "Personal");
-        req.setDayName(dto.dayName());
-        req.setTime(dto.time());
+        req.setDayName(firstSlot.getOrDefault("dayName", dto.dayName()));
+        req.setTime(firstSlot.getOrDefault("time", dto.time()));
         req.setStatus("PENDING");
         req.setPlanType(normalizedPlanType);
-        req.setDaysJson(dto.daysJson());
+        req.setDaysJson(serializeSlotsJson(slotsForPersistence));
         return requestRepo.save(req);
     }
 
-    private boolean slotIsUsedByAnotherApprovedRequest(StudentRequest currentRequest, String dayName, String time) {
+    private boolean slotIsUsedByAnotherApprovedRequest(StudentRequest currentRequest, Map<String, String> currentSlot) {
+        String currentStoredDay = requestStoredDay(currentRequest, currentSlot);
+        String currentTime = currentSlot.getOrDefault("time", "").trim();
+        if (currentStoredDay.isEmpty() || currentTime.isEmpty()) {
+            return false;
+        }
+
         return requestRepo.findByTrainerIdAndStatus(currentRequest.getTrainerId(), "APPROVED")
                 .stream()
                 .filter(other -> other.getId() != null && !other.getId().equals(currentRequest.getId()))
@@ -814,8 +1091,12 @@ public class RequestController {
                 && !other.getStudentId().equals(currentRequest.getStudentId()))
                 .anyMatch(other -> extractSelectedSlots(other)
                         .stream()
-                        .anyMatch(slot -> dayName.equals(slot.getOrDefault("dayName", "").trim())
-                                && time.equals(slot.getOrDefault("time", "").trim())));
+                        .anyMatch(slot -> {
+                            String otherStoredDay = requestStoredDay(other, slot);
+                            String otherTime = slot.getOrDefault("time", "").trim();
+                            return currentStoredDay.equals(otherStoredDay)
+                                    && currentTime.equals(otherTime);
+                        }));
     }
 
     private void releaseRequestSlots(StudentRequest req) {
@@ -823,22 +1104,60 @@ public class RequestController {
         for (Map<String, String> slot : selectedSlots) {
             String dayName = slot.getOrDefault("dayName", "").trim();
             String time = slot.getOrDefault("time", "").trim();
+            String storedDay = requestStoredDay(req, slot);
             if (!dayName.isEmpty()
                     && !time.isEmpty()
-                    && !slotIsUsedByAnotherApprovedRequest(req, dayName, time)) {
+                    && !slotIsUsedByAnotherApprovedRequest(req, slot)) {
                 slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
                         req.getTrainerId(),
-                        dayName,
+                        storedDay,
                         time,
                         "REQUEST"
                 );
+                if (!storedDay.equals(dayName)) {
+                    slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
+                            req.getTrainerId(),
+                            dayName,
+                            time,
+                            "REQUEST"
+                    );
+                }
+
+                clearLegacyRecurringManualSlot(req, slot);
             }
         }
+    }
+
+    private void clearLegacyRecurringManualSlot(StudentRequest req, Map<String, String> slot) {
+        if (req == null || !shouldPersistRequestSlot(req)) {
+            return;
+        }
+
+        String dayName = slot.getOrDefault("dayName", "").trim();
+        String time = slot.getOrDefault("time", "").trim();
+        String storedDay = requestStoredDay(req, slot);
+        if (dayName.isEmpty() || time.isEmpty() || storedDay.equals(dayName)) {
+            return;
+        }
+
+        slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
+                req.getTrainerId(),
+                dayName,
+                time,
+                "MANUAL"
+        );
+        slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
+                req.getTrainerId(),
+                dayName,
+                time,
+                "BLOCKED"
+        );
     }
 
     private void releaseApprovedStudentResources(Long trainerId, Long studentId, boolean removeConnection) {
         List<StudentRequest> requests = requestRepo
                 .findByStudentIdAndTrainerIdOrderByCreatedAtDesc(studentId, trainerId);
+        normalizeLegacyWeeklyRequests(requests);
 
         List<StudentRequest> toReleaseSlots = new ArrayList<>();
 
@@ -848,10 +1167,14 @@ public class RequestController {
             boolean changed = false;
 
             if (!"REJECTED".equals(req.getStatus())) {
-                toReleaseSlots.add(req);
                 req.setStatus("REJECTED");
                 changed = true;
             }
+
+            // Sempre tenta liberar os slots de requests do par.
+            // Isso corrige sobras legadas onde o request já estava REJECTED,
+            // mas os slots REQUEST permaneceram bloqueados.
+            toReleaseSlots.add(req);
 
             if (changed) {
                 requestRepo.save(req);
@@ -878,9 +1201,36 @@ public class RequestController {
                 for (Map<String, String> slot : extractSelectedSlots(req)) {
                     String dayName = slot.getOrDefault("dayName", "").trim();
                     String time = slot.getOrDefault("time", "").trim();
+                    String storedDay = requestStoredDay(req, slot);
                     if (dayName.isEmpty() || time.isEmpty()) {
                         continue;
                     }
+                    slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
+                            trainerId,
+                            storedDay,
+                            time,
+                            "REQUEST"
+                    );
+                    if (!storedDay.equals(dayName)) {
+                        slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
+                                trainerId,
+                                dayName,
+                                time,
+                                "REQUEST"
+                        );
+                    }
+                }
+                continue;
+            }
+            for (Map<String, String> slot : extractSelectedSlots(req)) {
+                String dayName = slot.getOrDefault("dayName", "").trim();
+                String time = slot.getOrDefault("time", "").trim();
+                String storedDay = requestStoredDay(req, slot);
+                if (dayName.isEmpty() || time.isEmpty()) {
+                    continue;
+                }
+
+                if (!storedDay.equals(dayName)) {
                     slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
                             trainerId,
                             dayName,
@@ -888,20 +1238,12 @@ public class RequestController {
                             "REQUEST"
                     );
                 }
-                continue;
-            }
-            for (Map<String, String> slot : extractSelectedSlots(req)) {
-                String dayName = slot.getOrDefault("dayName", "").trim();
-                String time = slot.getOrDefault("time", "").trim();
-                if (dayName.isEmpty() || time.isEmpty()) {
-                    continue;
-                }
 
-                slotRepo.findByTrainerIdAndDayNameAndTime(trainerId, dayName, time)
+                slotRepo.findByTrainerIdAndDayNameAndTime(trainerId, storedDay, time)
                         .orElseGet(() -> {
                             TrainerSlot blockedSlot = new TrainerSlot();
                             blockedSlot.setTrainerId(trainerId);
-                            blockedSlot.setDayName(dayName);
+                            blockedSlot.setDayName(storedDay);
                             blockedSlot.setTime(time);
                             blockedSlot.setState("REQUEST");
                             return slotRepo.save(blockedSlot);
@@ -1105,6 +1447,7 @@ public class RequestController {
     @GetMapping("/trainer/{trainerId}")
     public List<StudentRequest> getTrainerRequests(@PathVariable Long trainerId) {
         List<StudentRequest> requests = requestRepo.findByTrainerIdAndStatusOrderByCreatedAtDesc(trainerId, "PENDING");
+        normalizeLegacyWeeklyRequests(requests);
         expireStalePendingRequests(requests);
         return requests.stream()
                 .filter(req -> "PENDING".equals(req.getStatus()))
@@ -1114,15 +1457,20 @@ public class RequestController {
     // Personal vê solicitações APROVADAS (alunos confirmados)
     @GetMapping("/trainer/{trainerId}/approved")
     public List<StudentRequest> getApprovedTrainerRequests(@PathVariable Long trainerId) {
-        return requestRepo.findByTrainerIdAndStatusOrderByCreatedAtDesc(trainerId, "APPROVED");
+        List<StudentRequest> requests = requestRepo.findByTrainerIdAndStatusOrderByCreatedAtDesc(trainerId, "APPROVED");
+        normalizeLegacyWeeklyRequests(requests);
+        return requests;
     }
 
     // Personal vê histórico completo de solicitações (PENDING, APPROVED, REJECTED)
     @GetMapping("/trainer/{trainerId}/all")
     public List<StudentRequest> getAllTrainerRequests(@PathVariable Long trainerId) {
         List<StudentRequest> requests = requestRepo.findByTrainerIdOrderByCreatedAtDesc(trainerId);
+        normalizeLegacyWeeklyRequests(requests);
         if (expireStalePendingRequests(requests) > 0) {
-            return requestRepo.findByTrainerIdOrderByCreatedAtDesc(trainerId);
+            List<StudentRequest> refreshed = requestRepo.findByTrainerIdOrderByCreatedAtDesc(trainerId);
+            normalizeLegacyWeeklyRequests(refreshed);
+            return refreshed;
         }
         return requests;
     }
@@ -1141,6 +1489,7 @@ public class RequestController {
 
     private List<StudentRequest> getStudentRequestsHistory(Long studentId) {
         List<StudentRequest> requests = requestRepo.findByStudentIdOrderByCreatedAtDesc(studentId);
+        normalizeLegacyWeeklyRequests(requests);
         expireStalePendingRequests(requests);
         Set<Long> blockedTrainerIds = blockedStudentRepo.findByStudentId(studentId)
                 .stream()
@@ -1198,26 +1547,47 @@ public class RequestController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Status inválido: use APPROVED ou REJECTED");
         }
 
+        String planType = normalizePlanType(req.getPlanType());
+        LocalDateTime persistenceAnchor = req.getCreatedAt() != null ? req.getCreatedAt() : LocalDateTime.now();
+        List<Map<String, String>> selectedSlots = normalizeSlotsForPersistence(
+                extractSelectedSlots(req),
+                planType,
+                persistenceAnchor
+        );
+        if (!selectedSlots.isEmpty()) {
+            req.setDaysJson(serializeSlotsJson(selectedSlots));
+        }
+
         if ("APPROVED".equals(dto.status())) {
             if (shouldPersistRequestSlot(req)) {
-                List<Map<String, String>> selectedSlots = extractSelectedSlots(req);
                 for (Map<String, String> slot : selectedSlots) {
                     String dayName = slot.getOrDefault("dayName", "").trim();
                     String time = slot.getOrDefault("time", "").trim();
+                    String storedDay = requestStoredDay(req, slot);
                     if (dayName.isEmpty() || time.isEmpty()) continue;
 
-                    slotRepo.findByTrainerIdAndDayNameAndTime(req.getTrainerId(), dayName, time)
+                    clearLegacyRecurringManualSlot(req, slot);
+
+                    if (!storedDay.equals(dayName)) {
+                        slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
+                                req.getTrainerId(),
+                                dayName,
+                                time,
+                                "REQUEST"
+                        );
+                    }
+
+                    slotRepo.findByTrainerIdAndDayNameAndTime(req.getTrainerId(), storedDay, time)
                             .orElseGet(() -> {
                                 TrainerSlot blockedSlot = new TrainerSlot();
                                 blockedSlot.setTrainerId(req.getTrainerId());
-                                blockedSlot.setDayName(dayName);
+                                blockedSlot.setDayName(storedDay);
                                 blockedSlot.setTime(time);
                                 blockedSlot.setState("REQUEST");
                                 return slotRepo.save(blockedSlot);
                             });
                 }
             } else {
-                List<Map<String, String>> selectedSlots = extractSelectedSlots(req);
                 for (Map<String, String> slot : selectedSlots) {
                     String dayName = slot.getOrDefault("dayName", "").trim();
                     String time = slot.getOrDefault("time", "").trim();

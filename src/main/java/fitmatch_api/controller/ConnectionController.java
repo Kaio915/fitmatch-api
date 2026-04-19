@@ -16,7 +16,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.DayOfWeek;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -50,6 +53,9 @@ public class ConnectionController {
         private static final Pattern DAY_TIME_PATTERN_SINGLE_REVERSED = Pattern.compile(
             "'time'\\s*:\\s*'([^']+)'\\s*,\\s*'dayName'\\s*:\\s*'([^']+)'"
         );
+        private static final Pattern SLOT_OBJECT_PATTERN = Pattern.compile("\\{[^\\{\\}]*\\}");
+        private static final String MANUAL_ONCE_PREFIX = "__ONCE__:";
+        private static final String MANUAL_ONCE_SEPARATOR = "|";
 
     public ConnectionController(
             StudentTrainerConnectionRepository repo,
@@ -72,12 +78,33 @@ public class ConnectionController {
     private List<Map<String, String>> parseSlotsFromJson(String rawJson) {
         List<Map<String, String>> slots = new ArrayList<>();
 
+        Matcher objectMatcher = SLOT_OBJECT_PATTERN.matcher(rawJson);
+        while (objectMatcher.find()) {
+            String objectText = objectMatcher.group();
+            String dayName = extractJsonField(objectText, "dayName").trim();
+            String time = extractJsonField(objectText, "time").trim();
+            String dateIso = normalizeDateIso(extractJsonField(objectText, "dateIso"));
+            String dateLabel = extractJsonField(objectText, "dateLabel").trim();
+            if (!dayName.isEmpty() && !time.isEmpty()) {
+                HashMap<String, String> slot = new HashMap<>();
+                slot.put("dayName", dayName);
+                slot.put("time", time);
+                slot.put("dateIso", dateIso);
+                slot.put("dateLabel", dateLabel);
+                slots.add(slot);
+            }
+        }
+
+        if (!slots.isEmpty()) {
+            return slots;
+        }
+
         Matcher matcher = DAY_TIME_PATTERN_DOUBLE.matcher(rawJson);
         while (matcher.find()) {
             String dayName = matcher.group(1).trim();
             String time = matcher.group(2).trim();
             if (!dayName.isEmpty() && !time.isEmpty()) {
-                slots.add(Map.of("dayName", dayName, "time", time));
+                slots.add(Map.of("dayName", dayName, "time", time, "dateIso", "", "dateLabel", ""));
             }
         }
 
@@ -86,7 +113,7 @@ public class ConnectionController {
             String dayName = reversedMatcher.group(2).trim();
             String time = reversedMatcher.group(1).trim();
             if (!dayName.isEmpty() && !time.isEmpty()) {
-                slots.add(Map.of("dayName", dayName, "time", time));
+                slots.add(Map.of("dayName", dayName, "time", time, "dateIso", "", "dateLabel", ""));
             }
         }
 
@@ -95,7 +122,7 @@ public class ConnectionController {
             String dayName = singleMatcher.group(1).trim();
             String time = singleMatcher.group(2).trim();
             if (!dayName.isEmpty() && !time.isEmpty()) {
-                slots.add(Map.of("dayName", dayName, "time", time));
+                slots.add(Map.of("dayName", dayName, "time", time, "dateIso", "", "dateLabel", ""));
             }
         }
 
@@ -104,11 +131,132 @@ public class ConnectionController {
             String dayName = singleReversedMatcher.group(2).trim();
             String time = singleReversedMatcher.group(1).trim();
             if (!dayName.isEmpty() && !time.isEmpty()) {
-                slots.add(Map.of("dayName", dayName, "time", time));
+                slots.add(Map.of("dayName", dayName, "time", time, "dateIso", "", "dateLabel", ""));
             }
         }
 
         return slots;
+    }
+
+    private String extractJsonField(String objectText, String fieldName) {
+        if (objectText == null || objectText.isBlank() || fieldName == null || fieldName.isBlank()) {
+            return "";
+        }
+
+        String escapedField = Pattern.quote(fieldName);
+        Pattern doubleQuoted = Pattern.compile("\"" + escapedField + "\"\\s*:\\s*\"([^\"]*)\"");
+        Matcher dq = doubleQuoted.matcher(objectText);
+        if (dq.find()) {
+            return dq.group(1);
+        }
+
+        Pattern singleQuoted = Pattern.compile("'" + escapedField + "'\\s*:\\s*'([^']*)'");
+        Matcher sq = singleQuoted.matcher(objectText);
+        if (sq.find()) {
+            return sq.group(1);
+        }
+
+        return "";
+    }
+
+    private String normalizeDateIso(String rawValue) {
+        if (rawValue == null) {
+            return "";
+        }
+        String value = rawValue.trim();
+        if (value.isEmpty()) {
+            return "";
+        }
+        return value.length() >= 10 ? value.substring(0, 10) : value;
+    }
+
+    private DayOfWeek weekdayFromPt(String dayName) {
+        String normalized = dayName == null ? "" : dayName.trim().toLowerCase();
+        switch (normalized) {
+            case "segunda":
+                return DayOfWeek.MONDAY;
+            case "terca":
+            case "terça":
+                return DayOfWeek.TUESDAY;
+            case "quarta":
+                return DayOfWeek.WEDNESDAY;
+            case "quinta":
+                return DayOfWeek.THURSDAY;
+            case "sexta":
+                return DayOfWeek.FRIDAY;
+            case "sabado":
+            case "sábado":
+                return DayOfWeek.SATURDAY;
+            case "domingo":
+                return DayOfWeek.SUNDAY;
+            default:
+                return null;
+        }
+    }
+
+    private int[] parseHourMinute(String time) {
+        if (time == null) {
+            return null;
+        }
+        String[] parts = time.trim().split(":");
+        if (parts.length < 2) {
+            return null;
+        }
+        try {
+            int hour = Integer.parseInt(parts[0]);
+            int minute = Integer.parseInt(parts[1]);
+            if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+                return null;
+            }
+            return new int[]{hour, minute};
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private LocalDateTime resolveWeeklySlotStartAtForStorage(Map<String, String> slot, LocalDateTime anchor) {
+        if (slot == null) {
+            return null;
+        }
+
+        DayOfWeek weekday = weekdayFromPt(slot.getOrDefault("dayName", ""));
+        int[] hm = parseHourMinute(slot.getOrDefault("time", ""));
+        if (weekday == null || hm == null) {
+            return null;
+        }
+
+        String dateIso = normalizeDateIso(slot.getOrDefault("dateIso", ""));
+        if (!dateIso.isEmpty()) {
+            try {
+                LocalDate parsed = LocalDate.parse(dateIso);
+                return LocalDateTime.of(parsed, LocalTime.of(hm[0], hm[1]));
+            } catch (Exception ignored) {
+                // fallback abaixo
+            }
+        }
+
+        String dateLabel = slot.getOrDefault("dateLabel", "").trim();
+        if (!dateLabel.isEmpty()) {
+            try {
+                if (dateLabel.matches("^\\d{2}/\\d{2}/\\d{4}$")) {
+                    int day = Integer.parseInt(dateLabel.substring(0, 2));
+                    int month = Integer.parseInt(dateLabel.substring(3, 5));
+                    int year = Integer.parseInt(dateLabel.substring(6, 10));
+                    return LocalDateTime.of(year, month, day, hm[0], hm[1]);
+                }
+                if (dateLabel.matches("^\\d{2}/\\d{2}$")) {
+                    int day = Integer.parseInt(dateLabel.substring(0, 2));
+                    int month = Integer.parseInt(dateLabel.substring(3, 5));
+                    return LocalDateTime.of(anchor.getYear(), month, day, hm[0], hm[1]);
+                }
+            } catch (Exception ignored) {
+                // fallback abaixo
+            }
+        }
+
+        LocalDate weekStart = anchor.toLocalDate().minusDays(anchor.getDayOfWeek().getValue() - 1L);
+        LocalDate targetDate = weekStart.plusDays(weekday.getValue() - 1L);
+        return LocalDateTime.of(targetDate, LocalTime.of(hm[0], hm[1]));
     }
 
     private List<Map<String, String>> extractSelectedSlots(StudentRequest req) {
@@ -128,7 +276,9 @@ public class ConnectionController {
             if (!dayName.isBlank() || !time.isBlank()) {
                 slots.add(Map.of(
                         "dayName", dayName,
-                        "time", time
+                        "time", time,
+                    "dateIso", "",
+                    "dateLabel", ""
                 ));
             }
         }
@@ -142,15 +292,52 @@ public class ConnectionController {
         return "SEMANAL".equalsIgnoreCase(req.getPlanType().trim());
     }
 
-    private boolean slotIsUsedByAnotherApprovedRequestExcludingStudent(Long trainerId, Long blockedStudentId, String dayName, String time) {
+    private String buildStoredOnceDay(String dayName, String dateIso) {
+        return MANUAL_ONCE_PREFIX + dateIso + MANUAL_ONCE_SEPARATOR + dayName;
+    }
+
+    private String requestStoredDay(StudentRequest req, Map<String, String> slot) {
+        String dayName = slot.getOrDefault("dayName", "").trim();
+        if (dayName.isEmpty() || req == null || !shouldPersistRequestSlot(req)) {
+            return dayName;
+        }
+
+        String dateIso = normalizeDateIso(slot.getOrDefault("dateIso", ""));
+        if (dateIso.isEmpty()) {
+            LocalDateTime anchor = req.getCreatedAt() != null
+                    ? req.getCreatedAt()
+                    : (req.getApprovedAt() != null ? req.getApprovedAt() : LocalDateTime.now());
+            LocalDateTime slotStart = resolveWeeklySlotStartAtForStorage(slot, anchor);
+            if (slotStart != null) {
+                dateIso = slotStart.toLocalDate().toString();
+            }
+        }
+        if (dateIso.isEmpty()) {
+            return dayName;
+        }
+
+        return buildStoredOnceDay(dayName, dateIso);
+    }
+
+    private boolean slotIsUsedByAnotherApprovedRequestExcludingStudent(Long trainerId, Long blockedStudentId, StudentRequest currentRequest, Map<String, String> currentSlot) {
+        String currentStoredDay = requestStoredDay(currentRequest, currentSlot);
+        String currentTime = currentSlot.getOrDefault("time", "").trim();
+        if (currentStoredDay.isEmpty() || currentTime.isEmpty()) {
+            return false;
+        }
+
         return requestRepo.findByTrainerIdAndStatus(trainerId, "APPROVED")
                 .stream()
             .filter(this::shouldPersistRequestSlot)
                 .filter(other -> other.getStudentId() != null && !other.getStudentId().equals(blockedStudentId))
                 .anyMatch(other -> extractSelectedSlots(other)
                         .stream()
-                        .anyMatch(slot -> dayName.equals(slot.getOrDefault("dayName", "").trim())
-                                && time.equals(slot.getOrDefault("time", "").trim())));
+                        .anyMatch(slot -> {
+                            String otherStoredDay = requestStoredDay(other, slot);
+                            String otherTime = slot.getOrDefault("time", "").trim();
+                            return currentStoredDay.equals(otherStoredDay)
+                                    && currentTime.equals(otherTime);
+                        }));
     }
 
     private void releaseRequestSlotsForBlockedStudent(StudentRequest req, Long blockedStudentId) {
@@ -158,15 +345,24 @@ public class ConnectionController {
         for (Map<String, String> slot : selectedSlots) {
             String dayName = slot.getOrDefault("dayName", "").trim();
             String time = slot.getOrDefault("time", "").trim();
+            String storedDay = requestStoredDay(req, slot);
             if (!dayName.isEmpty()
                     && !time.isEmpty()
-                    && !slotIsUsedByAnotherApprovedRequestExcludingStudent(req.getTrainerId(), blockedStudentId, dayName, time)) {
+                    && !slotIsUsedByAnotherApprovedRequestExcludingStudent(req.getTrainerId(), blockedStudentId, req, slot)) {
                 slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
                         req.getTrainerId(),
-                        dayName,
+                        storedDay,
                         time,
                         "REQUEST"
                 );
+                if (!storedDay.equals(dayName)) {
+                    slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
+                            req.getTrainerId(),
+                            dayName,
+                            time,
+                            "REQUEST"
+                    );
+                }
             }
         }
     }
@@ -178,9 +374,36 @@ public class ConnectionController {
                 for (Map<String, String> slot : extractSelectedSlots(req)) {
                     String dayName = slot.getOrDefault("dayName", "").trim();
                     String time = slot.getOrDefault("time", "").trim();
+                    String storedDay = requestStoredDay(req, slot);
                     if (dayName.isEmpty() || time.isEmpty()) {
                         continue;
                     }
+                    slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
+                            trainerId,
+                            storedDay,
+                            time,
+                            "REQUEST"
+                    );
+                    if (!storedDay.equals(dayName)) {
+                        slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
+                                trainerId,
+                                dayName,
+                                time,
+                                "REQUEST"
+                        );
+                    }
+                }
+                continue;
+            }
+            for (Map<String, String> slot : extractSelectedSlots(req)) {
+                String dayName = slot.getOrDefault("dayName", "").trim();
+                String time = slot.getOrDefault("time", "").trim();
+                String storedDay = requestStoredDay(req, slot);
+                if (dayName.isEmpty() || time.isEmpty()) {
+                    continue;
+                }
+
+                if (!storedDay.equals(dayName)) {
                     slotRepo.deleteByTrainerIdAndDayNameAndTimeAndState(
                             trainerId,
                             dayName,
@@ -188,20 +411,12 @@ public class ConnectionController {
                             "REQUEST"
                     );
                 }
-                continue;
-            }
-            for (Map<String, String> slot : extractSelectedSlots(req)) {
-                String dayName = slot.getOrDefault("dayName", "").trim();
-                String time = slot.getOrDefault("time", "").trim();
-                if (dayName.isEmpty() || time.isEmpty()) {
-                    continue;
-                }
 
-                slotRepo.findByTrainerIdAndDayNameAndTime(trainerId, dayName, time)
+                slotRepo.findByTrainerIdAndDayNameAndTime(trainerId, storedDay, time)
                         .orElseGet(() -> {
                             fitmatch_api.model.TrainerSlot blockedSlot = new fitmatch_api.model.TrainerSlot();
                             blockedSlot.setTrainerId(trainerId);
-                            blockedSlot.setDayName(dayName);
+                            blockedSlot.setDayName(storedDay);
                             blockedSlot.setTime(time);
                             blockedSlot.setState("REQUEST");
                             return slotRepo.save(blockedSlot);
