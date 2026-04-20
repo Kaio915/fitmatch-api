@@ -3,6 +3,7 @@ package fitmatch_api.controller;
 import fitmatch_api.model.User;
 import fitmatch_api.model.UserStatus;
 import fitmatch_api.model.UserType;
+import fitmatch_api.service.CrefValidationService;
 import fitmatch_api.repository.BlockedStudentRepository;
 import fitmatch_api.repository.TrainerRatingRepository;
 import fitmatch_api.repository.UserRepository;
@@ -28,15 +29,18 @@ public class AuthController {
     private final UserRepository repo;
     private final TrainerRatingRepository ratingRepo;
     private final BlockedStudentRepository blockedStudentRepo;
+    private final CrefValidationService crefValidationService;
 
     public AuthController(
             UserRepository repo,
             TrainerRatingRepository ratingRepo,
-            BlockedStudentRepository blockedStudentRepo
+            BlockedStudentRepository blockedStudentRepo,
+            CrefValidationService crefValidationService
     ) {
         this.repo = repo;
         this.ratingRepo = ratingRepo;
         this.blockedStudentRepo = blockedStudentRepo;
+        this.crefValidationService = crefValidationService;
     }
 
     // ================= LOGIN (JSON) =================
@@ -165,9 +169,14 @@ public class AuthController {
     ) {
         final String emailNorm = safe(email);
         final String cpfNorm = normalizeCpf(cpf);
+        final CrefValidationService.CrefValidationResult crefValidation =
+                crefValidationService.validate(cref, null);
 
         if (emailNorm.isEmpty() || safe(password).isEmpty() || safe(name).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Preencha nome, email e senha");
+        }
+        if (!crefValidation.formatValid()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CREF inválido: " + crefValidation.formatMessage());
         }
         if (repo.findByEmail(emailNorm).isPresent()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email já cadastrado");
@@ -187,7 +196,7 @@ public class AuthController {
         user.setType(UserType.personal);
         user.setStatus(UserStatus.PENDING);
 
-        user.setCref(safe(cref));
+        user.setCref(crefValidation.normalizedCref());
         user.setCidade(safe(cidade));
         user.setEspecialidade(safe(especialidade));
         user.setValorHora(safe(valorHora));
