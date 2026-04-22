@@ -5,7 +5,6 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/cref")
-@CrossOrigin
 public class CrefValidationController {
 
     private final CrefValidationService crefValidationService;

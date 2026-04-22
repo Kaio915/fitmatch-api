@@ -24,7 +24,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/chat")
-@CrossOrigin(origins = "*")
 public class ChatController {
 
     private static final Pattern REQUEST_MARKER_PATTERN = Pattern.compile("\\[\\[REQ:(\\d+)\\]\\]");

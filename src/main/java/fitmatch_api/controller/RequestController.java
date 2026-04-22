@@ -34,7 +34,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/requests")
-@CrossOrigin(origins = "*")
 public class RequestController {
 
     private final StudentRequestRepository requestRepo;

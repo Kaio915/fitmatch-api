@@ -3,11 +3,8 @@ package fitmatch_api.controller;
 import fitmatch_api.model.Cidade;
 import fitmatch_api.service.CidadeService;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.bind.annotation.CrossOrigin;
 
 import java.util.List;
-
-@CrossOrigin(origins = "*")
 @RestController
 @RequestMapping("/cidades")
 public class CidadeController {

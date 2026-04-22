@@ -19,7 +19,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/workouts")
-@CrossOrigin(origins = "*")
 public class WorkoutController {
 
     private static final String PLAN_SLOT_SEPARATOR = "||";

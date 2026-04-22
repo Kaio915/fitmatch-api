@@ -21,7 +21,6 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/diet")
-@CrossOrigin(origins = "*")
 public class DietController {
 
     private static final List<String> MEAL_ORDER = List.of(

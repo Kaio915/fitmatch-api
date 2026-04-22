@@ -21,7 +21,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/auth")
-@CrossOrigin
 public class AuthController {
 
     private static final String ADMIN_DELETED_REASON = "Conta excluída pelo administrador";

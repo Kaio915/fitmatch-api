@@ -31,7 +31,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/connections")
-@CrossOrigin(origins = "*")
 public class ConnectionController {
 
     private final StudentTrainerConnectionRepository repo;

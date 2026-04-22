@@ -15,7 +15,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/admin")
-@CrossOrigin
 public class AdminController {
 
         private static final String ADMIN_DELETED_REASON = "Conta excluída pelo administrador";

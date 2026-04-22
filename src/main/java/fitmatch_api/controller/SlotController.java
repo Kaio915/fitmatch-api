@@ -16,7 +16,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/slots")
-@CrossOrigin(origins = "*")
 public class SlotController {
 
     private static final String MANUAL_ONCE_PREFIX = "__ONCE__:";

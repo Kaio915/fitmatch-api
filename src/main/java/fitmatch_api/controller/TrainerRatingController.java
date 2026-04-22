@@ -10,7 +10,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/ratings")
-@CrossOrigin(origins = "*")
 public class TrainerRatingController {
 
     private final TrainerRatingRepository ratingRepo;
