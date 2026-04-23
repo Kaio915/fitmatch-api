@@ -667,6 +667,33 @@ public class RequestController {
             return;
         }
 
+        if ("MENSAL".equals(planType)) {
+            Set<String> selectedWeekdays = new HashSet<>();
+            for (Map<String, String> slot : selectedSlots) {
+                String dayName = normalizeDayName(slot.getOrDefault("dayName", ""));
+                if (dayName.isBlank()) {
+                    throw new ResponseStatusException(
+                            HttpStatus.BAD_REQUEST,
+                            "Horário selecionado inválido"
+                    );
+                }
+
+                if (!selectedWeekdays.add(dayName)) {
+                    throw new ResponseStatusException(
+                            HttpStatus.BAD_REQUEST,
+                            "No plano mensal, não é permitido repetir o mesmo dia da semana"
+                    );
+                }
+
+                if (selectedWeekdays.size() > 7) {
+                    throw new ResponseStatusException(
+                            HttpStatus.BAD_REQUEST,
+                            "Plano mensal permite no máximo 7 dias da semana diferentes"
+                    );
+                }
+            }
+        }
+
         LocalDateTime windowEnd = resolvePlanWindowEnd(anchor, planType);
         for (Map<String, String> slot : selectedSlots) {
             LocalDateTime slotStart = resolveSlotStartAt(slot, anchor);

@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -126,16 +127,11 @@ public class AuthController {
         if (emailNorm.isEmpty() || safe(password).isEmpty() || safe(name).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Preencha nome, email e senha");
         }
-        if (repo.findByEmail(emailNorm).isPresent()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email já cadastrado");
-        }
-        if (repo.findByCpf(cpfNorm).isPresent()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "CPF já cadastrado");
-        }
+        User reusableUser = resolveReusableRejectedUser(emailNorm, cpfNorm);
 
         byte[] photoBytes = readPhoto(photo);
 
-        User user = new User();
+        User user = reusableUser != null ? reusableUser : new User();
         user.setName(safe(name));
         user.setEmail(emailNorm);
         user.setPassword(safe(password));
@@ -143,9 +139,20 @@ public class AuthController {
 
         user.setType(UserType.aluno);
         user.setStatus(UserStatus.PENDING);
+        user.setRejectionReason(null);
+        if (reusableUser != null) {
+            user.setCreatedAt(LocalDateTime.now());
+        }
 
         user.setObjetivos(safe(objetivos));
         user.setNivel(safe(nivel));
+
+        user.setCref(null);
+        user.setCidade(null);
+        user.setEspecialidade(null);
+        user.setValorHora(null);
+        user.setHorasPorSessao(null);
+        user.setBio(null);
 
         user.setPhoto(photoBytes);
 
@@ -177,16 +184,11 @@ public class AuthController {
         if (!crefValidation.formatValid()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CREF inválido: " + crefValidation.formatMessage());
         }
-        if (repo.findByEmail(emailNorm).isPresent()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email já cadastrado");
-        }
-        if (repo.findByCpf(cpfNorm).isPresent()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "CPF já cadastrado");
-        }
+        User reusableUser = resolveReusableRejectedUser(emailNorm, cpfNorm);
 
         byte[] photoBytes = readPhoto(photo);
 
-        User user = new User();
+        User user = reusableUser != null ? reusableUser : new User();
         user.setName(safe(name));
         user.setEmail(emailNorm);
         user.setPassword(safe(password));
@@ -194,12 +196,19 @@ public class AuthController {
 
         user.setType(UserType.personal);
         user.setStatus(UserStatus.PENDING);
+        user.setRejectionReason(null);
+        if (reusableUser != null) {
+            user.setCreatedAt(LocalDateTime.now());
+        }
 
         user.setCref(crefValidation.normalizedCref());
         user.setCidade(safe(cidade));
         user.setEspecialidade(safe(especialidade));
         user.setValorHora(safe(valorHora));
         user.setBio(safe(bio));
+
+        user.setObjetivos(null);
+        user.setNivel(null);
 
         user.setPhoto(photoBytes);
 
@@ -240,6 +249,46 @@ public class AuthController {
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Falha ao ler a imagem");
         }
+    }
+
+    private static boolean isReusableRejected(User user) {
+        return user != null
+                && user.getStatus() == UserStatus.REJECTED
+                && user.getType() != UserType.admin;
+    }
+
+    private User resolveReusableRejectedUser(String emailNorm, String cpfNorm) {
+        User emailUser = repo.findByEmail(emailNorm).orElse(null);
+        User cpfUser = repo.findByCpf(cpfNorm).orElse(null);
+
+        if (emailUser == null && cpfUser == null) {
+            return null;
+        }
+
+        if (emailUser != null && cpfUser != null) {
+            if (!emailUser.getId().equals(cpfUser.getId())) {
+                throw new ResponseStatusException(
+                        HttpStatus.CONFLICT,
+                        "Email e CPF já estão vinculados a contas diferentes"
+                );
+            }
+
+            if (isReusableRejected(emailUser)) {
+                return emailUser;
+            }
+
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email já cadastrado");
+        }
+
+        User single = emailUser != null ? emailUser : cpfUser;
+        if (isReusableRejected(single)) {
+            return single;
+        }
+
+        if (emailUser != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email já cadastrado");
+        }
+        throw new ResponseStatusException(HttpStatus.CONFLICT, "CPF já cadastrado");
     }
 
     // ================= DTOs =================
