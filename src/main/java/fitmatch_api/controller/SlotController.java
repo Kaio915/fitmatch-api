@@ -2,6 +2,7 @@ package fitmatch_api.controller;
 
 import fitmatch_api.model.TrainerSlot;
 import fitmatch_api.repository.TrainerSlotRepository;
+import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.TrainerSlotService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -42,6 +43,7 @@ public class SlotController {
     // Retorna todos os slots bloqueados de um personal
     @GetMapping("/trainer/{trainerId}")
     public List<Map<String, Object>> getSlots(@PathVariable Long trainerId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         List<Map<String, Object>> payload = new ArrayList<>();
         for (TrainerSlot slot : slotRepo.findByTrainerId(trainerId)) {
             String storedDay = slot.getDayName() == null ? "" : slot.getDayName().trim();
@@ -73,6 +75,7 @@ public class SlotController {
     @PostMapping("/trainer/{trainerId}/block")
     public Map<String, Object> blockSlot(@PathVariable Long trainerId,
                                   @RequestBody SlotDto dto) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         if (dto.dayName() == null || dto.dayName().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "dayName é obrigatório");
         }
@@ -121,6 +124,7 @@ public class SlotController {
     @DeleteMapping("/trainer/{trainerId}/block")
     public void unblockSlot(@PathVariable Long trainerId,
                              @RequestBody SlotDto dto) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         if (dto.dayName() == null || dto.dayName().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "dayName é obrigatório");
         }

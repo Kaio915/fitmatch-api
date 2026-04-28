@@ -10,6 +10,7 @@ import fitmatch_api.repository.StudentRequestRepository;
 import fitmatch_api.repository.StudentTrainerConnectionRepository;
 import fitmatch_api.repository.TrainerSlotRepository;
 import fitmatch_api.repository.UserRepository;
+import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.BlockedStudentService;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
@@ -581,6 +582,9 @@ public class ConnectionController {
         if (dto.studentId() == null || dto.trainerId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "studentId e trainerId são obrigatórios");
         }
+
+        AuthContext.requireSelfOrAdmin(dto.studentId());
+
         return repo.findByStudentIdAndTrainerId(dto.studentId(), dto.trainerId())
                 .orElseGet(() -> {
                     StudentTrainerConnection conn = new StudentTrainerConnection();
@@ -595,6 +599,7 @@ public class ConnectionController {
     // Retorna todas as conexões de um trainer (quem o segue)
     @GetMapping("/trainer/{trainerId}")
     public List<StudentTrainerConnection> getByTrainer(@PathVariable Long trainerId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         return repo.findByTrainerId(trainerId);
     }
 
@@ -602,6 +607,7 @@ public class ConnectionController {
         // junto com os dados do plano aprovado para exibição no chat/dashboard.
         @GetMapping("/trainer/{trainerId}/approved")
         public List<Map<String, Object>> getApprovedByTrainer(@PathVariable Long trainerId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         Set<Long> blockedStudentIds = blockedStudentRepo.findByTrainerIdOrderByBlockedAtDesc(trainerId)
             .stream()
             .map(BlockedStudent::getStudentId)
@@ -643,6 +649,7 @@ public class ConnectionController {
     // Backfill automático: se trainerName for null (registro antigo), busca no cadastro de usuários
     @GetMapping("/student/{studentId}")
     public List<StudentTrainerConnection> getByStudent(@PathVariable Long studentId) {
+        AuthContext.requireSelfOrAdmin(studentId);
         Set<Long> blockedTrainerIds = blockedStudentRepo.findByStudentId(studentId)
                 .stream()
                 .map(BlockedStudent::getTrainerId)
@@ -667,9 +674,10 @@ public class ConnectionController {
     // Remove conexão
     @DeleteMapping("/{id}")
     public void disconnect(@PathVariable Long id) {
-        if (!repo.existsById(id)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conexão não encontrada");
-        }
+        StudentTrainerConnection conn = repo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conexão não encontrada"));
+
+        AuthContext.requireSelfOrAdminFromAny(conn.getStudentId(), conn.getTrainerId());
         repo.deleteById(id);
     }
 
@@ -681,6 +689,7 @@ public class ConnectionController {
             @PathVariable Long studentId,
             @RequestParam(required = false) Long requestId
         ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         List<fitmatch_api.model.TrainerSlot> preservedSlots = computePreservedSlots(trainerId, studentId);
         final boolean hadActiveConnection = repo
                 .findByStudentIdAndTrainerId(studentId, trainerId)
@@ -778,11 +787,13 @@ public class ConnectionController {
 
     @DeleteMapping("/trainer/{trainerId}/students/{studentId}/block")
     public void unblockStudent(@PathVariable Long trainerId, @PathVariable Long studentId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         blockedStudentService.unblockStudent(trainerId, studentId);
     }
 
     @GetMapping("/trainer/{trainerId}/students/blocked")
     public List<BlockedStudent> getBlockedStudents(@PathVariable Long trainerId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         return blockedStudentRepo.findByTrainerIdOrderByBlockedAtDesc(trainerId);
     }
 

@@ -8,6 +8,7 @@ import fitmatch_api.repository.BlockedStudentRepository;
 import fitmatch_api.repository.ChatMessageRepository;
 import fitmatch_api.repository.StudentRequestRepository;
 import fitmatch_api.repository.UserRepository;
+import fitmatch_api.security.AuthContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -95,6 +96,8 @@ public class ChatController {
                     "senderId, receiverId e text são obrigatórios");
         }
 
+        AuthContext.requireSelfOrAdmin(dto.senderId());
+
         boolean blocked = blockedStudentRepo.existsByTrainerIdAndStudentId(dto.senderId(), dto.receiverId())
             || blockedStudentRepo.existsByTrainerIdAndStudentId(dto.receiverId(), dto.senderId());
         if (blocked) {
@@ -120,6 +123,7 @@ public class ChatController {
             @RequestParam Long userId1,
             @RequestParam Long userId2,
             @RequestParam(required = false) Long requestId) {
+        AuthContext.requireSelfOrAdminFromAny(userId1, userId2);
         List<ChatMessage> conversation = repo.findConversation(userId1, userId2);
         if (requestId == null) {
             return conversation;

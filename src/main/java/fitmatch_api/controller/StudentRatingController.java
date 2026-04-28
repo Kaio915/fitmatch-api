@@ -2,6 +2,7 @@ package fitmatch_api.controller;
 
 import fitmatch_api.model.StudentRating;
 import fitmatch_api.repository.StudentRatingRepository;
+import fitmatch_api.security.AuthContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -24,6 +25,9 @@ public class StudentRatingController {
         if (dto.trainerId() == null || dto.studentId() == null || dto.stars() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "trainerId, studentId e stars são obrigatórios");
         }
+
+        AuthContext.requireSelfOrAdmin(dto.trainerId());
+
         if (dto.stars() < 1 || dto.stars() > 5) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "stars deve estar entre 1 e 5");
         }

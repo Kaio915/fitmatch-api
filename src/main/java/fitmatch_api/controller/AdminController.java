@@ -4,6 +4,7 @@ import fitmatch_api.model.User;
 import fitmatch_api.model.UserStatus;
 import fitmatch_api.model.UserType;
 import fitmatch_api.repository.UserRepository;
+import fitmatch_api.security.AuthContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -126,6 +127,8 @@ public class AdminController {
             @PathVariable UserType type
     ) {
 
+        AuthContext.requireRole("ADMIN");
+
         return repo
                 .findByTypeAndStatus(type, UserStatus.PENDING)
                 .stream()
@@ -137,6 +140,8 @@ public class AdminController {
 
     @PutMapping("/approve/{id}")
     public void approve(@PathVariable Long id) {
+
+        AuthContext.requireRole("ADMIN");
 
         User user = repo
                 .findById(id)
@@ -163,6 +168,8 @@ public class AdminController {
             Map<String, String> body
     ) {
 
+        AuthContext.requireRole("ADMIN");
+
         User user = repo
                 .findById(id)
                 .orElseThrow(() ->
@@ -186,6 +193,9 @@ public class AdminController {
 
         @DeleteMapping("/users/{id}")
         public void deleteUser(@PathVariable Long id) {
+
+                AuthContext.requireRole("ADMIN");
+
                 User user = repo
                                 .findById(id)
                                 .orElseThrow(() ->
@@ -212,6 +222,8 @@ public class AdminController {
             @RequestParam(required = false)
             UserStatus status
     ) {
+
+        AuthContext.requireRole("ADMIN");
 
         List<User> users;
 

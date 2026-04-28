@@ -10,6 +10,7 @@ import fitmatch_api.repository.DietFoodRepository;
 import fitmatch_api.repository.DietGoalRepository;
 import fitmatch_api.repository.DietSavedMealRepository;
 import fitmatch_api.repository.UserRepository;
+import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.EdamamFoodService;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
@@ -507,6 +508,7 @@ public class DietController {
     }
 
     private void ensureUserExists(Long userId) {
+        AuthContext.requireSelfOrAdmin(userId);
         if (userId == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId inválido");
         }

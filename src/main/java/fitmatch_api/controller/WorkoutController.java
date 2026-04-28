@@ -7,6 +7,7 @@ import fitmatch_api.repository.StudentRequestRepository;
 import fitmatch_api.repository.StudentWorkoutPlanRepository;
 import fitmatch_api.repository.WorkoutCustomExerciseRepository;
 import fitmatch_api.repository.WorkoutFavoriteRepository;
+import fitmatch_api.security.AuthContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -114,6 +115,7 @@ public class WorkoutController {
 
             @GetMapping("/trainer/{trainerId}/custom-exercises")
             public List<Map<String, Object>> getCustomExercises(@PathVariable Long trainerId) {
+            AuthContext.requireSelfOrAdmin(trainerId);
             return customExerciseRepo.findByTrainerIdOrderByUpdatedAtDesc(trainerId)
                 .stream()
                 .map(this::toCustomExercisePayload)
@@ -125,6 +127,7 @@ public class WorkoutController {
                 @PathVariable Long trainerId,
                 @RequestBody CustomExerciseUpsertDto dto
             ) {
+            AuthContext.requireSelfOrAdmin(trainerId);
             if (dto == null || dto.name() == null || dto.name().isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome do treino é obrigatório");
             }
@@ -152,6 +155,7 @@ public class WorkoutController {
                 @PathVariable Long exerciseId,
                 @RequestBody CustomExerciseUpsertDto dto
             ) {
+            AuthContext.requireSelfOrAdmin(trainerId);
             if (dto == null || dto.name() == null || dto.name().isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome do treino é obrigatório");
             }
@@ -179,6 +183,7 @@ public class WorkoutController {
                 @PathVariable Long trainerId,
                 @PathVariable Long exerciseId
             ) {
+            AuthContext.requireSelfOrAdmin(trainerId);
             WorkoutCustomExercise custom = customExerciseRepo.findByIdAndTrainerId(exerciseId, trainerId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Treino personalizado não encontrado"));
             customExerciseRepo.delete(custom);
@@ -186,6 +191,7 @@ public class WorkoutController {
 
     @GetMapping("/trainer/{trainerId}/favorites")
     public List<Map<String, Object>> getFavorites(@PathVariable Long trainerId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         return favoriteRepo.findByTrainerIdOrderByUpdatedAtDesc(trainerId)
                 .stream()
                 .map(this::toFavoritePayload)
@@ -197,6 +203,7 @@ public class WorkoutController {
             @PathVariable Long trainerId,
             @RequestBody FavoriteUpsertDto dto
     ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         validateFavoriteDto(dto);
         List<Map<String, String>> exercises = sanitizeExercises(dto.exercises());
         validateFavoriteUniqueness(trainerId, exercises, null);
@@ -215,6 +222,7 @@ public class WorkoutController {
             @PathVariable Long favoriteId,
             @RequestBody FavoriteUpsertDto dto
     ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         validateFavoriteDto(dto);
         List<Map<String, String>> exercises = sanitizeExercises(dto.exercises());
         validateFavoriteUniqueness(trainerId, exercises, favoriteId);
@@ -233,6 +241,7 @@ public class WorkoutController {
             @PathVariable Long trainerId,
             @PathVariable Long favoriteId
     ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         WorkoutFavorite favorite = favoriteRepo.findByIdAndTrainerId(favoriteId, trainerId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Favorito não encontrado"));
         favoriteRepo.delete(favorite);
@@ -244,6 +253,7 @@ public class WorkoutController {
             @PathVariable Long favoriteId,
             @RequestBody(required = false) CloneFavoriteDto dto
         ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         WorkoutFavorite source = favoriteRepo.findByIdAndTrainerId(favoriteId, trainerId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Favorito não encontrado"));
 
@@ -268,6 +278,7 @@ public class WorkoutController {
             @PathVariable Long trainerId,
             @PathVariable Long studentId
     ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         ensureApprovedPair(trainerId, studentId);
         return getSortedStudentPlans(trainerId, studentId)
                 .stream()
@@ -281,6 +292,7 @@ public class WorkoutController {
             @PathVariable Long studentId,
             @RequestBody DayPlanUpsertDto dto
     ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         ensureApprovedPair(trainerId, studentId);
         String dayName = normalizeAndValidateDay(dto.dayName());
         String time = normalizeAndValidateTime(dto.time());
@@ -306,6 +318,7 @@ public class WorkoutController {
             @PathVariable Long planId,
             @RequestBody DayPlanUpsertDto dto
     ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         ensureApprovedPair(trainerId, studentId);
         String dayName = normalizeAndValidateDay(dto.dayName());
         String time = normalizeAndValidateTime(dto.time());
@@ -333,6 +346,7 @@ public class WorkoutController {
             @PathVariable Long studentId,
             @PathVariable Long planId
     ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         ensureApprovedPair(trainerId, studentId);
         StudentWorkoutPlan plan = workoutPlanRepo.findByIdAndTrainerIdAndStudentId(planId, trainerId, studentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Treino do aluno não encontrado"));
@@ -344,6 +358,7 @@ public class WorkoutController {
             @PathVariable Long studentId,
             @PathVariable Long trainerId
     ) {
+        AuthContext.requireSelfOrAdminFromAny(studentId, trainerId);
         ensureApprovedPair(trainerId, studentId);
         return getSortedStudentPlans(trainerId, studentId)
                 .stream()

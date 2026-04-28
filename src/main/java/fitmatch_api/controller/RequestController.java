@@ -9,6 +9,7 @@ import fitmatch_api.repository.ChatMessageRepository;
 import fitmatch_api.repository.TrainerSlotRepository;
 import fitmatch_api.repository.StudentTrainerConnectionRepository;
 import fitmatch_api.model.TrainerSlot;
+import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.BlockedStudentService;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
@@ -1033,6 +1034,8 @@ public class RequestController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Campos obrigatórios ausentes");
         }
 
+        AuthContext.requireSelfOrAdmin(dto.studentId());
+
         List<StudentRequest> pairPendingRequests = requestRepo
             .findByStudentIdAndTrainerIdAndStatusOrderByCreatedAtDesc(dto.studentId(), dto.trainerId(), "PENDING");
         expireStalePendingRequests(pairPendingRequests);
@@ -1472,6 +1475,7 @@ public class RequestController {
     // Personal vê solicitações PENDENTES
     @GetMapping("/trainer/{trainerId}")
     public List<StudentRequest> getTrainerRequests(@PathVariable Long trainerId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         List<StudentRequest> requests = requestRepo.findByTrainerIdAndStatusOrderByCreatedAtDesc(trainerId, "PENDING");
         normalizeLegacyWeeklyRequests(requests);
         expireStalePendingRequests(requests);
@@ -1483,6 +1487,7 @@ public class RequestController {
     // Personal vê solicitações APROVADAS (alunos confirmados)
     @GetMapping("/trainer/{trainerId}/approved")
     public List<StudentRequest> getApprovedTrainerRequests(@PathVariable Long trainerId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         List<StudentRequest> requests = requestRepo.findByTrainerIdAndStatusOrderByCreatedAtDesc(trainerId, "APPROVED");
         normalizeLegacyWeeklyRequests(requests);
         return requests;
@@ -1491,6 +1496,7 @@ public class RequestController {
     // Personal vê histórico completo de solicitações (PENDING, APPROVED, REJECTED)
     @GetMapping("/trainer/{trainerId}/all")
     public List<StudentRequest> getAllTrainerRequests(@PathVariable Long trainerId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         List<StudentRequest> requests = requestRepo.findByTrainerIdOrderByCreatedAtDesc(trainerId);
         normalizeLegacyWeeklyRequests(requests);
         if (expireStalePendingRequests(requests) > 0) {
@@ -1504,12 +1510,14 @@ public class RequestController {
     // Aluno vê suas próprias solicitações (todos os status)
     @GetMapping("/student/{studentId}")
     public List<StudentRequest> getStudentRequests(@PathVariable Long studentId) {
+        AuthContext.requireSelfOrAdmin(studentId);
         return getStudentRequestsHistory(studentId);
     }
 
     // Alias explícito para histórico completo do aluno
     @GetMapping("/student/{studentId}/all")
     public List<StudentRequest> getStudentRequestsAll(@PathVariable Long studentId) {
+        AuthContext.requireSelfOrAdmin(studentId);
         return getStudentRequestsHistory(studentId);
     }
 
@@ -1560,6 +1568,9 @@ public class RequestController {
     private StudentRequest hideRequestForStudentInternal(Long id) {
         StudentRequest req = requestRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Solicitação não encontrada"));
+
+        AuthContext.requireSelfOrAdmin(req.getStudentId());
+
         req.setHiddenForStudent(true);
         return requestRepo.save(req);
     }
@@ -1569,6 +1580,9 @@ public class RequestController {
     public StudentRequest updateStatus(@PathVariable Long id, @RequestBody UpdateStatusDto dto) {
         StudentRequest req = requestRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Solicitação não encontrada"));
+
+        AuthContext.requireSelfOrAdmin(req.getTrainerId());
+
         if (!List.of("APPROVED", "REJECTED").contains(dto.status())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Status inválido: use APPROVED ou REJECTED");
         }
@@ -1655,6 +1669,7 @@ public class RequestController {
             @PathVariable Long studentId,
             @RequestParam(required = false) Long requestId
         ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         List<TrainerSlot> preservedSlots = computePreservedSlots(trainerId, studentId);
         final boolean hadActiveConnection = connectionRepo
                 .findByStudentIdAndTrainerId(studentId, trainerId)
@@ -1748,6 +1763,7 @@ public class RequestController {
             @PathVariable Long studentId,
             @RequestParam(required = false) Long requestId
         ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         List<StudentRequest> pairRequests = requestRepo
                 .findByStudentIdAndTrainerIdOrderByCreatedAtDesc(studentId, trainerId);
 
@@ -1814,21 +1830,24 @@ public class RequestController {
     // Personal remove bloqueio de aluno
     @DeleteMapping("/trainer/{trainerId}/students/{studentId}/block")
     public void unblockStudent(@PathVariable Long trainerId, @PathVariable Long studentId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         blockedStudentService.unblockStudent(trainerId, studentId);
     }
 
     // Personal lista alunos bloqueados
     @GetMapping("/trainer/{trainerId}/students/blocked")
     public List<BlockedStudent> getBlockedStudents(@PathVariable Long trainerId) {
+        AuthContext.requireSelfOrAdmin(trainerId);
         return blockedStudentRepo.findByTrainerIdOrderByBlockedAtDesc(trainerId);
     }
 
     // Aluno apaga uma solicitação
     @DeleteMapping("/{id}")
     public void deleteRequest(@PathVariable Long id) {
-        if (!requestRepo.existsById(id)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Solicitação não encontrada");
-        }
+        StudentRequest req = requestRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Solicitação não encontrada"));
+
+        AuthContext.requireSelfOrAdminFromAny(req.getStudentId(), req.getTrainerId());
         requestRepo.deleteById(id);
     }
 
@@ -1853,6 +1872,8 @@ public class RequestController {
     private StudentRequest cancelRequestByStudentInternal(Long id, String reason) {
         StudentRequest req = requestRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Solicitação não encontrada"));
+
+        AuthContext.requireSelfOrAdmin(req.getStudentId());
 
         if (!"REJECTED".equals(req.getStatus())) {
             sendStudentCancelledOwnRequestMessage(req, reason);
@@ -1885,6 +1906,9 @@ public class RequestController {
     private StudentRequest hideRequestForTrainerInternal(Long id) {
         StudentRequest req = requestRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Solicitação não encontrada"));
+
+        AuthContext.requireSelfOrAdmin(req.getTrainerId());
+
         if ("PENDING".equals(req.getStatus())) {
             req.setStatus("REJECTED");
         }

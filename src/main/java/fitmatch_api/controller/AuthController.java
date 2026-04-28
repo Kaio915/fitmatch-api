@@ -3,6 +3,7 @@ package fitmatch_api.controller;
 import fitmatch_api.model.User;
 import fitmatch_api.model.UserStatus;
 import fitmatch_api.model.UserType;
+import fitmatch_api.security.JwtService;
 import fitmatch_api.service.CrefValidationService;
 import fitmatch_api.repository.BlockedStudentRepository;
 import fitmatch_api.repository.TrainerRatingRepository;
@@ -11,6 +12,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -30,17 +32,23 @@ public class AuthController {
     private final TrainerRatingRepository ratingRepo;
     private final BlockedStudentRepository blockedStudentRepo;
     private final CrefValidationService crefValidationService;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
 
     public AuthController(
             UserRepository repo,
             TrainerRatingRepository ratingRepo,
             BlockedStudentRepository blockedStudentRepo,
-            CrefValidationService crefValidationService
+            CrefValidationService crefValidationService,
+            PasswordEncoder passwordEncoder,
+            JwtService jwtService
     ) {
         this.repo = repo;
         this.ratingRepo = ratingRepo;
         this.blockedStudentRepo = blockedStudentRepo;
         this.crefValidationService = crefValidationService;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
     }
 
     // ================= LOGIN (JSON) =================
@@ -60,13 +68,13 @@ public class AuthController {
                         HttpStatus.UNAUTHORIZED, "Usuário não encontrado"
                 ));
 
-        if (user.getPassword() == null || !user.getPassword().equals(reqPass)) {
+        if (!passwordMatchesAndUpgradeIfLegacy(user, reqPass)) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Senha inválida");
         }
 
         // ✅ ADMIN: sempre pode logar em qualquer tela
         if (user.getType() == UserType.admin) {
-            return AuthResponse.from(user);
+            return AuthResponse.from(user, issueTokenFor(user));
         }
 
         // ✅ aluno/personal: precisa logar pela tela correta
@@ -104,10 +112,38 @@ public class AuthController {
         }
 
         if (user.getStatus() == UserStatus.APPROVED) {
-            return AuthResponse.from(user);
+            return AuthResponse.from(user, issueTokenFor(user));
         }
 
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Status inválido");
+    }
+
+    private boolean passwordMatchesAndUpgradeIfLegacy(User user, String rawPassword) {
+        String stored = user.getPassword();
+        if (stored == null || stored.isBlank()) {
+            return false;
+        }
+
+        boolean storedLooksHashed = stored.startsWith("$2a$") || stored.startsWith("$2b$") || stored.startsWith("$2y$");
+        boolean matches;
+        if (storedLooksHashed) {
+            matches = passwordEncoder.matches(rawPassword, stored);
+        } else {
+            matches = stored.equals(rawPassword);
+            if (matches) {
+                user.setPassword(passwordEncoder.encode(rawPassword));
+                repo.save(user);
+            }
+        }
+        return matches;
+    }
+
+    private String issueTokenFor(User user) {
+        if (user == null || user.getId() == null) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Usuário inválido");
+        }
+        String role = user.getType() == null ? "USER" : user.getType().name().toUpperCase();
+        return jwtService.issueToken(user.getId(), Set.of(role));
     }
 
     // ================= REGISTER STUDENT (MULTIPART) =================
@@ -134,7 +170,7 @@ public class AuthController {
         User user = reusableUser != null ? reusableUser : new User();
         user.setName(safe(name));
         user.setEmail(emailNorm);
-        user.setPassword(safe(password));
+        user.setPassword(passwordEncoder.encode(safe(password)));
         user.setCpf(cpfNorm);
 
         user.setType(UserType.aluno);
@@ -191,7 +227,7 @@ public class AuthController {
         User user = reusableUser != null ? reusableUser : new User();
         user.setName(safe(name));
         user.setEmail(emailNorm);
-        user.setPassword(safe(password));
+        user.setPassword(passwordEncoder.encode(safe(password)));
         user.setCpf(cpfNorm);
 
         user.setType(UserType.personal);
@@ -311,9 +347,10 @@ public class AuthController {
             String especialidade,
             String valorHora,
             String horasPorSessao,
-            String bio
+            String bio,
+            String token
     ) {
-        public static AuthResponse from(User u) {
+        public static AuthResponse from(User u, String token) {
             return new AuthResponse(
                     u.getId(),
                     u.getName(),
@@ -329,7 +366,8 @@ public class AuthController {
                     u.getEspecialidade(),
                     u.getValorHora(),
                     u.getHorasPorSessao(),
-                    u.getBio()
+                    u.getBio(),
+                    token
             );
         }
     }
