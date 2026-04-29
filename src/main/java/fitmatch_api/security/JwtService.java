@@ -20,16 +20,16 @@ public class JwtService {
 
     private final ObjectMapper objectMapper;
     private final byte[] secret;
-    private final long expirationSeconds;
+    private final long expirationMs;
 
     public JwtService(
             ObjectMapper objectMapper,
             @Value("${app.jwt.secret}") String secret,
-            @Value("${app.jwt.expiration-seconds:86400}") long expirationSeconds
+            @Value("${app.jwt.expiration-ms:14400000}") long expirationMs
     ) {
         this.objectMapper = objectMapper;
         this.secret = secret == null ? new byte[0] : secret.getBytes(StandardCharsets.UTF_8);
-        this.expirationSeconds = expirationSeconds;
+        this.expirationMs = expirationMs;
 
         if (this.secret.length < 32) {
             // 32 bytes ~ 256 bits. Menor que isso é fácil de brute-force.
@@ -43,7 +43,7 @@ public class JwtService {
         }
         Instant now = Instant.now();
         long iat = now.getEpochSecond();
-        long exp = now.plusSeconds(expirationSeconds).getEpochSecond();
+        long exp = now.plusMillis(expirationMs).getEpochSecond();
 
         Map<String, Object> header = Map.of(
                 "alg", "HS256",
