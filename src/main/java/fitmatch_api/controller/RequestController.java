@@ -1281,19 +1281,6 @@ public class RequestController {
         }
     }
 
-    private boolean hasTerminationMessageInCurrentCycle(Long trainerId, Long studentId, StudentRequest referenceReq) {
-        if (referenceReq == null) {
-            return chatMessageRepo.hasTerminationMessage(trainerId, studentId);
-        }
-
-        LocalDateTime cycleStartAt = referenceReq.getCreatedAt();
-        if (cycleStartAt == null) {
-            return chatMessageRepo.hasTerminationMessage(trainerId, studentId);
-        }
-
-        return chatMessageRepo.hasTerminationMessageSince(trainerId, studentId, cycleStartAt);
-    }
-
     private String resolveTrainerName(StudentRequest req, Long trainerId) {
         if (req != null && req.getTrainerName() != null && !req.getTrainerName().isBlank()) {
             return req.getTrainerName();
@@ -1407,34 +1394,6 @@ public class RequestController {
         String text = "❌ Sua solicitação foi recusada por " + trainerName + ". Horário: " + slotsText + ".";
         msg.setText(appendRequestMarker(text, pendingReq));
         chatMessageRepo.save(msg);
-    }
-
-    private void sendStudentWithPendingRemovedMessage(Long trainerId, Long studentId, StudentRequest referenceReq) {
-        if (chatMessageRepo.hasTerminationMessage(trainerId, studentId)
-                && !hasActiveRequestBetween(studentId, trainerId)) {
-            return;
-        }
-        try {
-            String trainerName = resolveTrainerName(referenceReq, trainerId);
-            ChatMessage msg = new ChatMessage();
-            msg.setSenderId(trainerId);
-            msg.setReceiverId(studentId);
-            msg.setText("A sua solicitação foi recusada pelo personal " + trainerName + " e você foi removido como aluno. Com isso, seus horários de atendimento foram cancelados.");
-            chatMessageRepo.save(msg);
-        } catch (Exception e) {
-            System.err.println("Erro ao enviar mensagem Caso 3: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private Set<String> toSlotKeys(List<Map<String, String>> slots) {
-        return slots.stream()
-                .map(slot -> slotKey(
-                        slot.getOrDefault("dayName", ""),
-                        slot.getOrDefault("time", "")
-                ))
-                .filter(key -> !key.equals("|"))
-                .collect(Collectors.toSet());
     }
 
     private List<TrainerSlot> computePreservedSlots(Long trainerId, Long studentId) {

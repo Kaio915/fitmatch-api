@@ -3,6 +3,7 @@ package fitmatch_api.controller;
 import fitmatch_api.model.User;
 import fitmatch_api.model.UserStatus;
 import fitmatch_api.model.UserType;
+import fitmatch_api.security.AuthContext;
 import fitmatch_api.security.JwtService;
 import fitmatch_api.service.CrefValidationService;
 import fitmatch_api.repository.BlockedStudentRepository;
@@ -377,6 +378,7 @@ public class AuthController {
 
     @PatchMapping("/trainer/{id}/profile")
     public void updateTrainerProfile(@PathVariable Long id, @RequestBody UpdateTrainerProfileDto dto) {
+        AuthContext.requireSelfOrAdmin(id);
         User user = repo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
         if (user.getType() != UserType.personal) {

@@ -149,7 +149,7 @@ public class EdamamFoodService {
             return;
         }
 
-        String label = foodNode.path("label").asText("").trim();
+        String label = foodNode.path("label").asText().trim();
         if (label.isEmpty()) {
             return;
         }
@@ -171,8 +171,8 @@ public class EdamamFoodService {
         row.put("proteinPer100g", round1(protein));
         row.put("carbsPer100g", round1(carbs));
         row.put("fatPer100g", round1(fat));
-        row.put("brand", foodNode.path("brand").asText(""));
-        row.put("category", foodNode.path("category").asText(""));
+        row.put("brand", foodNode.path("brand").asText());
+        row.put("category", foodNode.path("category").asText());
         row.put("source", "edamam");
 
         dedupe.add(key);
@@ -206,11 +206,11 @@ public class EdamamFoodService {
 
         try {
             JsonNode root = objectMapper.readTree(responseBody);
-            String fromMessage = root.path("message").asText("").trim();
+            String fromMessage = root.path("message").asText().trim();
             if (!fromMessage.isEmpty()) {
                 return fromMessage;
             }
-            String fromError = root.path("error").asText("").trim();
+            String fromError = root.path("error").asText().trim();
             if (!fromError.isEmpty()) {
                 return fromError;
             }
