@@ -576,14 +576,14 @@ public class ConnectionController {
         }
     }
 
-    // Aluno se conecta ao personal (idempotente)
+    // Aluno se conecta ao personal (idempotente) — pode ser chamado pelo aluno ou pelo trainer
     @PostMapping
     public StudentTrainerConnection connect(@RequestBody ConnectDto dto) {
         if (dto.studentId() == null || dto.trainerId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "studentId e trainerId são obrigatórios");
         }
 
-        AuthContext.requireSelfOrAdmin(dto.studentId());
+        AuthContext.requireSelfOrAdminFromAny(dto.studentId(), dto.trainerId());
 
         return repo.findByStudentIdAndTrainerId(dto.studentId(), dto.trainerId())
                 .orElseGet(() -> {
@@ -596,11 +596,28 @@ public class ConnectionController {
                 });
     }
 
-    // Retorna todas as conexões de um trainer (quem o segue)
+    // Retorna todas as conexões de um trainer (quem o segue) — apenas o próprio trainer ou admin
     @GetMapping("/trainer/{trainerId}")
     public List<StudentTrainerConnection> getByTrainer(@PathVariable Long trainerId) {
         AuthContext.requireSelfOrAdmin(trainerId);
         return repo.findByTrainerId(trainerId);
+    }
+
+    // Qualquer autenticado pode verificar se UM aluno específico está conectado ao trainer
+    // (usado pelo aluno ao ver o perfil do trainer)
+    @GetMapping("/trainer/{trainerId}/student/{studentId}")
+    public Map<String, Object> getConnectionBetween(@PathVariable Long trainerId, @PathVariable Long studentId) {
+        return repo.findByStudentIdAndTrainerId(studentId, trainerId)
+                .<Map<String, Object>>map(conn -> {
+                    Map<String, Object> m = new java.util.LinkedHashMap<>();
+                    m.put("id", conn.getId());
+                    m.put("studentId", conn.getStudentId());
+                    m.put("trainerId", conn.getTrainerId());
+                    m.put("studentName", conn.getStudentName());
+                    m.put("trainerName", conn.getTrainerName());
+                    return m;
+                })
+                .orElse(Map.of());
     }
 
         // Retorna apenas alunos com solicitação APROVADA para o trainer,

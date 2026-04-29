@@ -299,10 +299,14 @@ public class WorkoutController {
         String storedDay = buildStoredDayValue(dayName, time);
         List<Map<String, String>> exercises = sanitizeExercises(dto.exercises());
 
-        StudentWorkoutPlan plan = workoutPlanRepo
-            .findByTrainerIdAndStudentIdAndDayName(trainerId, studentId, storedDay)
-                .orElseGet(StudentWorkoutPlan::new);
+        Optional<StudentWorkoutPlan> existing = workoutPlanRepo
+            .findByTrainerIdAndStudentIdAndDayName(trainerId, studentId, storedDay);
+        if (existing.isPresent()) {
+            workoutPlanRepo.delete(existing.get());
+            workoutPlanRepo.flush();
+        }
 
+        StudentWorkoutPlan plan = new StudentWorkoutPlan();
         plan.setTrainerId(trainerId);
         plan.setStudentId(studentId);
         plan.setDayName(storedDay);
@@ -331,13 +335,18 @@ public class WorkoutController {
         Optional<StudentWorkoutPlan> sameSlot = workoutPlanRepo
             .findByTrainerIdAndStudentIdAndDayName(trainerId, studentId, storedDay);
         if (sameSlot.isPresent() && !Objects.equals(sameSlot.get().getId(), plan.getId())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe treino cadastrado para esse dia e horário");
+            workoutPlanRepo.delete(sameSlot.get());
         }
+        workoutPlanRepo.delete(plan);
+        workoutPlanRepo.flush();
 
-        plan.setDayName(storedDay);
-        plan.setExercisesJson(writeExercisesJson(exercises));
+        StudentWorkoutPlan updated = new StudentWorkoutPlan();
+        updated.setTrainerId(trainerId);
+        updated.setStudentId(studentId);
+        updated.setDayName(storedDay);
+        updated.setExercisesJson(writeExercisesJson(exercises));
 
-        return toPlanPayload(workoutPlanRepo.save(plan));
+        return toPlanPayload(workoutPlanRepo.save(updated));
     }
 
     @DeleteMapping("/trainer/{trainerId}/students/{studentId}/plans/{planId}")

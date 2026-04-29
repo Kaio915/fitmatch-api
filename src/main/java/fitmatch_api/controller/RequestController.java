@@ -1493,10 +1493,10 @@ public class RequestController {
         return requests;
     }
 
-    // Personal vê histórico completo de solicitações (PENDING, APPROVED, REJECTED)
+    // Histórico completo de solicitações do trainer
+    // Qualquer usuário autenticado pode consultar (necessário para calcular disponibilidade na listagem)
     @GetMapping("/trainer/{trainerId}/all")
     public List<StudentRequest> getAllTrainerRequests(@PathVariable Long trainerId) {
-        AuthContext.requireSelfOrAdmin(trainerId);
         List<StudentRequest> requests = requestRepo.findByTrainerIdOrderByCreatedAtDesc(trainerId);
         normalizeLegacyWeeklyRequests(requests);
         if (expireStalePendingRequests(requests) > 0) {
@@ -1841,6 +1841,14 @@ public class RequestController {
         return blockedStudentRepo.findByTrainerIdOrderByBlockedAtDesc(trainerId);
     }
 
+    // Qualquer usuário autenticado pode verificar se UM aluno específico está bloqueado por um trainer
+    // (usado pelo aluno para saber se pode enviar mensagem)
+    @GetMapping("/trainer/{trainerId}/students/{studentId}/is-blocked")
+    public Map<String, Boolean> isStudentBlocked(@PathVariable Long trainerId, @PathVariable Long studentId) {
+        boolean blocked = blockedStudentRepo.existsByTrainerIdAndStudentId(trainerId, studentId);
+        return Map.of("blocked", blocked);
+    }
+
     // Aluno apaga uma solicitação
     @DeleteMapping("/{id}")
     public void deleteRequest(@PathVariable Long id) {
@@ -1909,7 +1917,8 @@ public class RequestController {
 
         AuthContext.requireSelfOrAdmin(req.getTrainerId());
 
-        if ("PENDING".equals(req.getStatus())) {
+        if ("PENDING".equals(req.getStatus()) || "APPROVED".equals(req.getStatus())) {
+            releaseRequestSlots(req);
             req.setStatus("REJECTED");
         }
         req.setHiddenForTrainer(true);

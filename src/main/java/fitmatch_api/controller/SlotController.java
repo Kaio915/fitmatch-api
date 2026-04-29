@@ -41,9 +41,9 @@ public class SlotController {
     }
 
     // Retorna todos os slots bloqueados de um personal
+    // Qualquer usuário autenticado pode consultar (necessário para calcular disponibilidade)
     @GetMapping("/trainer/{trainerId}")
     public List<Map<String, Object>> getSlots(@PathVariable Long trainerId) {
-        AuthContext.requireSelfOrAdmin(trainerId);
         List<Map<String, Object>> payload = new ArrayList<>();
         for (TrainerSlot slot : slotRepo.findByTrainerId(trainerId)) {
             String storedDay = slot.getDayName() == null ? "" : slot.getDayName().trim();

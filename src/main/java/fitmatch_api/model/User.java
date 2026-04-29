@@ -85,6 +85,9 @@ public class User {
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
+    @Column
+    private LocalDateTime lastOnlineAt;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
@@ -170,6 +173,10 @@ public class User {
         return createdAt;
     }
 
+    public LocalDateTime getLastOnlineAt() {
+        return lastOnlineAt;
+    }
+
     // ================= SETTERS =================
 
     public void setId(Long id) {
@@ -246,5 +253,9 @@ public class User {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public void setLastOnlineAt(LocalDateTime lastOnlineAt) {
+        this.lastOnlineAt = lastOnlineAt;
     }
 }
