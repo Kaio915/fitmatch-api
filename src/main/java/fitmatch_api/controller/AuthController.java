@@ -512,6 +512,11 @@ public class AuthController {
 
     @GetMapping("/students")
     public java.util.List<StudentPublicInfo> listApprovedStudents() {
+        fitmatch_api.security.JwtPrincipal principal = fitmatch_api.security.AuthContext.requirePrincipal();
+        if (!principal.hasRole("PERSONAL") && !principal.hasRole("ADMIN")) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "Acesso negado");
+        }
         return repo.findByTypeAndStatus(UserType.aluno, UserStatus.APPROVED)
                 .stream()
                 .map(u -> new StudentPublicInfo(

@@ -45,13 +45,16 @@ public class PresenceController {
         typingMap.remove(principal.userId());
     }
 
-    // Registra que o usuário autenticado está digitando para um destinatário
+    // Registra que o usuário autenticado está digitando para um destinatário.
+    // Se receiverId for null ou ausente, remove o indicador de digitação.
     @PutMapping("/typing")
     public void typing(@RequestBody Map<String, Long> body) {
         JwtPrincipal principal = AuthContext.requirePrincipal();
         Long receiverId = body.get("receiverId");
         if (receiverId != null) {
             typingMap.put(principal.userId(), new TypingEntry(receiverId, LocalDateTime.now()));
+        } else {
+            typingMap.remove(principal.userId());
         }
     }
 
