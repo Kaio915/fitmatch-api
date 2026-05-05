@@ -16,4 +16,9 @@ public interface DietEntryRepository extends JpaRepository<DietEntry, Long> {
     boolean existsByUserIdAndEntryDateAndMealTypeIgnoreCase(Long userId, LocalDate entryDate, String mealType);
 
     boolean existsByUserIdAndFoodId(Long userId, Long foodId);
+
+    List<DietEntry> findByUserIdAndFoodIdAndMealTypeIgnoreCase(Long userId, Long foodId, String mealType);
+
+    List<DietEntry> findByUserIdAndFoodIdAndMealTypeIgnoreCaseAndEntryDateGreaterThanEqual(
+            Long userId, Long foodId, String mealType, LocalDate from);
 }

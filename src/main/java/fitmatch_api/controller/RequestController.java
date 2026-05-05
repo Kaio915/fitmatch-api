@@ -1878,7 +1878,9 @@ public class RequestController {
 
         AuthContext.requireSelfOrAdmin(req.getTrainerId());
 
-        if ("PENDING".equals(req.getStatus()) || "APPROVED".equals(req.getStatus())) {
+        // Solicitações aprovadas: apenas ocultar da lista do personal,
+        // sem liberar slots nem remover conexão com o aluno.
+        if ("PENDING".equals(req.getStatus())) {
             releaseRequestSlots(req);
             req.setStatus("REJECTED");
         }

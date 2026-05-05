@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.util.*;
+import java.util.Locale;
 
 @RestController
 @RequestMapping("/diet")
@@ -503,6 +504,63 @@ public class DietController {
         entryRepo.delete(entry);
     }
 
+    @Transactional
+    @PatchMapping("/{userId}/entries/{entryId}/quantity")
+    public Map<String, Object> updateEntryQuantity(
+            @PathVariable Long userId,
+            @PathVariable Long entryId,
+            @RequestBody EntryQuantityUpdateDto dto
+    ) {
+        ensureUserExists(userId);
+        AuthContext.requireSelfOrAdmin(userId);
+
+        DietEntry entry = entryRepo.findByIdAndUserId(entryId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Registro não encontrado"));
+
+        double newQty = normalizePositive(dto.quantityGrams(), "Quantidade");
+        String scope = dto.scope() != null ? dto.scope().toUpperCase(Locale.ROOT) : "TODAY";
+
+        // Atualiza a entrada específica
+        entry.setQuantityGrams(newQty);
+        entryRepo.save(entry);
+
+        // Atualiza outras entradas com o mesmo alimento e refeição conforme escopo
+        if ("FUTURE".equals(scope)) {
+            List<DietEntry> futures = entryRepo
+                    .findByUserIdAndFoodIdAndMealTypeIgnoreCaseAndEntryDateGreaterThanEqual(
+                            userId, entry.getFoodId(), entry.getMealType(), LocalDate.now());
+            for (DietEntry e : futures) {
+                if (!e.getId().equals(entry.getId())) {
+                    e.setQuantityGrams(newQty);
+                    entryRepo.save(e);
+                }
+            }
+        } else if ("ALL".equals(scope)) {
+            List<DietEntry> all = entryRepo
+                    .findByUserIdAndFoodIdAndMealTypeIgnoreCase(
+                            userId, entry.getFoodId(), entry.getMealType());
+            for (DietEntry e : all) {
+                if (!e.getId().equals(entry.getId())) {
+                    e.setQuantityGrams(newQty);
+                    entryRepo.save(e);
+                }
+            }
+        }
+
+        DietFood food = foodRepo.findByIdAndUserId(entry.getFoodId(), userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alimento não encontrado"));
+
+        double factor = newQty / 100.0;
+        return toEntryPayload(
+                entry,
+                food,
+                safe(food.getCaloriesPer100g()) * factor,
+                safe(food.getProteinPer100g()) * factor,
+                safe(food.getCarbsPer100g()) * factor,
+                safe(food.getFatPer100g()) * factor
+        );
+    }
+
     private boolean isNotToday(LocalDate date) {
         return date != null && !date.equals(LocalDate.now());
     }
@@ -712,6 +770,8 @@ public class DietController {
     public record GoalUpsertDto(Double basalKcal, Double targetKcal) {}
 
     public record EntryCreateDto(Long foodId, String mealType, Double quantityGrams, String date) {}
+
+    public record EntryQuantityUpdateDto(Double quantityGrams, String scope) {}
 
     public record SavedMealItemDto(
             Long foodId,
