@@ -486,13 +486,21 @@ public class AuthController {
                     .map(block -> block.getTrainerId())
                     .collect(Collectors.toSet());
 
+        java.util.Map<Long, TrainerRatingRepository.RatingSummary> ratingSummaries =
+                ratingRepo.findRatingSummaries()
+                        .stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                                TrainerRatingRepository.RatingSummary::getTrainerId,
+                                s -> s
+                        ));
+
         return repo.findByTypeAndStatus(UserType.personal, UserStatus.APPROVED)
                 .stream()
                 .filter(u -> !blockedTrainerIds.contains(u.getId()))
                 .map(u -> {
-                    var ratings = ratingRepo.findByTrainerIdOrderByCreatedAtDesc(u.getId());
-                    double media = ratings.isEmpty() ? 0.0 :
-                            ratings.stream().mapToInt(r -> r.getStars()).average().orElse(0.0);
+                    TrainerRatingRepository.RatingSummary summary = ratingSummaries.get(u.getId());
+                    double media = summary == null || summary.getAvgStars() == null ? 0.0 : summary.getAvgStars();
+                    long count = summary == null || summary.getCount() == null ? 0L : summary.getCount();
                     double mediaRounded = (double) Math.round(media * 10) / 10.0;
                     return new TrainerPublicInfo(
                             u.getId(),
@@ -503,8 +511,8 @@ public class AuthController {
                             u.getHorasPorSessao(),
                             u.getBio(),
                             u.getCref(),
-                            ratings.isEmpty() ? null : mediaRounded,
-                            ratings.size()
+                            count == 0 ? null : mediaRounded,
+                            (int) count
                     );
                 })
                 .collect(java.util.stream.Collectors.toList());

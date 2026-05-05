@@ -4,7 +4,10 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "chat_messages")
+@Table(name = "chat_messages", indexes = {
+    @Index(name = "idx_cm_sr_time", columnList = "sender_id, receiver_id, sent_at"),
+    @Index(name = "idx_cm_rs_time", columnList = "receiver_id, sender_id, sent_at")
+})
 public class ChatMessage {
 
     @Id
@@ -22,6 +25,9 @@ public class ChatMessage {
 
     @Column(name = "sent_at", updatable = false)
     private LocalDateTime sentAt;
+
+    @Column(name = "is_termination", nullable = false)
+    private boolean termination = false;
 
     @PrePersist
     protected void onCreate() {
@@ -41,4 +47,7 @@ public class ChatMessage {
     public void setText(String text) { this.text = text; }
 
     public LocalDateTime getSentAt() { return sentAt; }
+
+    public boolean isTermination() { return termination; }
+    public void setTermination(boolean termination) { this.termination = termination; }
 }

@@ -485,6 +485,7 @@ public class ConnectionController {
         ChatMessage msg = new ChatMessage();
         msg.setSenderId(trainerId);
         msg.setReceiverId(studentId);
+        msg.setTermination(true);
         msg.setText(appendRequestMarker("Olá, " + studentName + ". " + trainerName + " cancelou o plano aprovado de " + slotsText + " e você não faz mais parte de Meus Alunos deste personal.", referenceReq));
         chatMessageRepo.save(msg);
     }
@@ -499,6 +500,7 @@ public class ConnectionController {
         ChatMessage msg = new ChatMessage();
         msg.setSenderId(trainerId);
         msg.setReceiverId(studentId);
+        msg.setTermination(true);
         String text = "❌ Sua solicitação foi recusada por " + trainerName + ". Horário: " + slotsText + ".";
         msg.setText(appendRequestMarker(text, pendingReq));
         chatMessageRepo.save(msg);

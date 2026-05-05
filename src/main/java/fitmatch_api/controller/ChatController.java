@@ -9,11 +9,14 @@ import fitmatch_api.repository.ChatMessageRepository;
 import fitmatch_api.repository.StudentRequestRepository;
 import fitmatch_api.repository.UserRepository;
 import fitmatch_api.security.AuthContext;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -122,12 +125,19 @@ public class ChatController {
     public List<ChatMessage> getConversation(
             @RequestParam Long userId1,
             @RequestParam Long userId2,
-            @RequestParam(required = false) Long requestId) {
+            @RequestParam(required = false) Long requestId,
+            @RequestParam(required = false, defaultValue = "150") int limit) {
         AuthContext.requireSelfOrAdminFromAny(userId1, userId2);
-        List<ChatMessage> conversation = repo.findConversation(userId1, userId2);
+
         if (requestId == null) {
-            return conversation;
+            List<ChatMessage> latest = repo.findConversationLatest(
+                    userId1, userId2, PageRequest.of(0, Math.max(1, limit)));
+            List<ChatMessage> ordered = new ArrayList<>(latest);
+            Collections.reverse(ordered);
+            return ordered;
         }
+
+        List<ChatMessage> conversation = repo.findConversation(userId1, userId2);
 
         StudentRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new ResponseStatusException(
