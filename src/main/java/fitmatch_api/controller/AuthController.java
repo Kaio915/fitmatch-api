@@ -4,6 +4,7 @@ import fitmatch_api.model.User;
 import fitmatch_api.model.UserStatus;
 import fitmatch_api.model.UserType;
 import fitmatch_api.security.AuthContext;
+import fitmatch_api.security.JwtPrincipal;
 import fitmatch_api.security.JwtService;
 import fitmatch_api.service.CrefValidationService;
 import fitmatch_api.repository.BlockedStudentRepository;
@@ -97,8 +98,9 @@ public class AuthController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cadastro inválido (status nulo)");
         }
 
-        if (user.getStatus() == UserStatus.PENDING) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Cadastro em análise");
+        if (user.getStatus() == UserStatus.PENDING
+                || user.getStatus() == UserStatus.TEMPORARILY_REJECTED) {
+            return AuthResponse.from(user, issueTokenFor(user));
         }
 
         if (user.getStatus() == UserStatus.REJECTED) {
@@ -156,6 +158,7 @@ public class AuthController {
             @RequestParam String cpf,
             @RequestParam String objetivos,
             @RequestParam String nivel,
+            @RequestParam(required = false) String cidade,
             @RequestPart("photo") MultipartFile photo
     ) {
         final String emailNorm = safe(email);
@@ -183,9 +186,9 @@ public class AuthController {
 
         user.setObjetivos(safe(objetivos));
         user.setNivel(safe(nivel));
+        user.setCidade(safe(cidade));
 
         user.setCref(null);
-        user.setCidade(null);
         user.setEspecialidade(null);
         user.setValorHora(null);
         user.setHorasPorSessao(null);
@@ -222,6 +225,10 @@ public class AuthController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CREF inválido: " + crefValidation.formatMessage());
         }
         User reusableUser = resolveReusableRejectedUser(emailNorm, cpfNorm);
+        ensureCrefAvailable(
+                crefValidation.normalizedCref(),
+                reusableUser == null ? null : reusableUser.getId()
+        );
 
         byte[] photoBytes = readPhoto(photo);
 
@@ -248,6 +255,100 @@ public class AuthController {
         user.setNivel(null);
 
         user.setPhoto(photoBytes);
+
+        repo.save(user);
+    }
+
+    // ================= EDIT STUDENT CADASTRO =================
+
+    @PutMapping(value = "/cadastro/student", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public void editStudentCadastro(
+            @RequestParam String name,
+            @RequestParam(required = false) String email,
+            @RequestParam(required = false) String password,
+            @RequestParam String cpf,
+            @RequestParam String objetivos,
+            @RequestParam String nivel,
+            @RequestParam(required = false) String cidade,
+            @RequestPart(value = "photo", required = false) MultipartFile photo
+    ) {
+        User user = requireCadastroEditable(UserType.aluno);
+        final String cpfNorm = normalizeCpf(cpf);
+
+        user.setName(safe(name));
+        final String emailNorm = safe(email);
+        if (!emailNorm.isEmpty()) {
+            ensureEmailAvailable(emailNorm, user.getId());
+            user.setEmail(emailNorm);
+        }
+        if (!safe(password).isEmpty()) {
+            user.setPassword(passwordEncoder.encode(safe(password)));
+        }
+        user.setCpf(cpfNorm);
+        user.setObjetivos(safe(objetivos));
+        user.setNivel(safe(nivel));
+        user.setCidade(safe(cidade));
+
+        byte[] photoBytes = readOptionalPhoto(photo);
+        if (photoBytes != null) {
+            user.setPhoto(photoBytes);
+        }
+
+        user.setStatus(UserStatus.PENDING);
+        user.setRejectionReason(null);
+
+        repo.save(user);
+    }
+
+    // ================= EDIT TRAINER CADASTRO =================
+
+    @PutMapping(value = "/cadastro/trainer", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public void editTrainerCadastro(
+            @RequestParam String name,
+            @RequestParam(required = false) String email,
+            @RequestParam(required = false) String password,
+            @RequestParam String cpf,
+            @RequestParam String cref,
+            @RequestParam String cidade,
+            @RequestParam(required = false) String especialidade,
+            @RequestParam(required = false) String valorHora,
+            @RequestParam String bio,
+            @RequestPart(value = "photo", required = false) MultipartFile photo
+    ) {
+        User user = requireCadastroEditable(UserType.personal);
+        final String cpfNorm = normalizeCpf(cpf);
+        final CrefValidationService.CrefValidationResult crefValidation =
+                crefValidationService.validate(cref, null);
+
+        if (!crefValidation.formatValid()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CREF inválido: " + crefValidation.formatMessage());
+        }
+
+        ensureCrefAvailable(crefValidation.normalizedCref(), user.getId());
+
+        user.setName(safe(name));
+        final String emailNorm = safe(email);
+        if (!emailNorm.isEmpty()) {
+            ensureEmailAvailable(emailNorm, user.getId());
+            user.setEmail(emailNorm);
+        }
+        if (!safe(password).isEmpty()) {
+            user.setPassword(passwordEncoder.encode(safe(password)));
+        }
+        user.setCpf(cpfNorm);
+        user.setCref(crefValidation.normalizedCref());
+        user.setCidade(safe(cidade));
+        user.setEspecialidade(safe(especialidade));
+        user.setValorHora(safe(valorHora));
+        user.setBio(safe(bio));
+
+        byte[] photoBytes = readOptionalPhoto(photo);
+        if (photoBytes != null) {
+            user.setPhoto(photoBytes);
+        }
+
+        user.setStatus(UserStatus.PENDING);
+        user.setRejectionReason(null);
 
         repo.save(user);
     }
@@ -288,6 +389,31 @@ public class AuthController {
         }
     }
 
+    private static byte[] readOptionalPhoto(MultipartFile photo) {
+        if (photo == null || photo.isEmpty()) {
+            return null;
+        }
+        return readPhoto(photo);
+    }
+
+    private User requireCadastroEditable(UserType expectedType) {
+        JwtPrincipal principal = AuthContext.requirePrincipal();
+        User user = repo.findById(principal.userId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
+
+        if (user.getType() != expectedType) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tipo de cadastro inválido para este usuário");
+        }
+
+        if (user.getStatus() == UserStatus.APPROVED
+                || user.getStatus() == UserStatus.REJECTED) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Não é possível editar o cadastro: ele já foi aprovado ou rejeitado");
+        }
+
+        return user;
+    }
+
     private static boolean isReusableRejected(User user) {
         return user != null
                 && user.getStatus() == UserStatus.REJECTED
@@ -326,6 +452,30 @@ public class AuthController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email já cadastrado");
         }
         throw new ResponseStatusException(HttpStatus.CONFLICT, "CPF já cadastrado");
+    }
+
+    private void ensureCrefAvailable(String normalizedCref, Long excludeUserId) {
+        if (normalizedCref == null || normalizedCref.isBlank()) {
+            return;
+        }
+
+        boolean alreadyTaken = repo.findByCref(normalizedCref)
+                .stream()
+                .anyMatch(existing ->
+                        (excludeUserId == null || !existing.getId().equals(excludeUserId))
+                                && !isReusableRejected(existing));
+
+        if (alreadyTaken) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "CREF já cadastrado");
+        }
+    }
+
+    private void ensureEmailAvailable(String emailNorm, Long excludeUserId) {
+        repo.findByEmail(emailNorm).ifPresent(existing -> {
+            if (excludeUserId == null || !existing.getId().equals(excludeUserId)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Email já cadastrado");
+            }
+        });
     }
 
     // ================= DTOs =================

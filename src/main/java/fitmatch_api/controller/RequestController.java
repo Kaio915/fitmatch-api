@@ -8,7 +8,9 @@ import fitmatch_api.repository.BlockedStudentRepository;
 import fitmatch_api.repository.ChatMessageRepository;
 import fitmatch_api.repository.TrainerSlotRepository;
 import fitmatch_api.repository.StudentTrainerConnectionRepository;
+import fitmatch_api.repository.UserRepository;
 import fitmatch_api.model.TrainerSlot;
+import fitmatch_api.model.User;
 import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.BlockedStudentService;
 import org.springframework.http.HttpStatus;
@@ -43,6 +45,7 @@ public class RequestController {
     private final StudentTrainerConnectionRepository connectionRepo;
     private final ChatMessageRepository chatMessageRepo;
     private final BlockedStudentService blockedStudentService;
+    private final UserRepository userRepo;
         private static final Pattern DAY_TIME_PATTERN_DOUBLE = Pattern.compile(
             "\\\"dayName\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"\\s*,\\s*\\\"time\\\"\\s*:\\s*\\\"([^\\\"]+)\\\""
         );
@@ -66,7 +69,8 @@ public class RequestController {
             BlockedStudentRepository blockedStudentRepo,
             StudentTrainerConnectionRepository connectionRepo,
             ChatMessageRepository chatMessageRepo,
-            BlockedStudentService blockedStudentService
+            BlockedStudentService blockedStudentService,
+            UserRepository userRepo
     ) {
         this.requestRepo = requestRepo;
         this.slotRepo = slotRepo;
@@ -74,6 +78,7 @@ public class RequestController {
         this.connectionRepo = connectionRepo;
         this.chatMessageRepo = chatMessageRepo;
         this.blockedStudentService = blockedStudentService;
+        this.userRepo = userRepo;
     }
 
     private List<Map<String, String>> parseSlotsFromJson(String rawJson) {
@@ -1096,6 +1101,11 @@ public class RequestController {
         req.setStudentId(dto.studentId());
         req.setStudentName(dto.studentName() != null ? dto.studentName() : "Aluno");
         req.setTrainerName(dto.trainerName() != null ? dto.trainerName() : "Personal");
+        req.setStudentCidade(
+                dto.studentId() == null
+                        ? null
+                        : userRepo.findById(dto.studentId()).map(User::getCidade).orElse(null)
+        );
         req.setDayName(firstSlot.getOrDefault("dayName", dto.dayName()));
         req.setTime(firstSlot.getOrDefault("time", dto.time()));
         req.setStatus("PENDING");

@@ -3,12 +3,14 @@ package fitmatch_api.controller;
 import fitmatch_api.model.ChatMessage;
 import fitmatch_api.model.StudentRequest;
 import fitmatch_api.model.User;
+import fitmatch_api.model.UserStatus;
 import fitmatch_api.model.UserType;
 import fitmatch_api.repository.BlockedStudentRepository;
 import fitmatch_api.repository.ChatMessageRepository;
 import fitmatch_api.repository.StudentRequestRepository;
 import fitmatch_api.repository.UserRepository;
 import fitmatch_api.security.AuthContext;
+import fitmatch_api.service.EmailService;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -43,17 +45,20 @@ public class ChatController {
     private final BlockedStudentRepository blockedStudentRepo;
     private final UserRepository userRepo;
     private final StudentRequestRepository requestRepo;
+    private final EmailService emailService;
 
     public ChatController(
             ChatMessageRepository repo,
             BlockedStudentRepository blockedStudentRepo,
             UserRepository userRepo,
-            StudentRequestRepository requestRepo
+            StudentRequestRepository requestRepo,
+            EmailService emailService
     ) {
         this.repo = repo;
         this.blockedStudentRepo = blockedStudentRepo;
         this.userRepo = userRepo;
         this.requestRepo = requestRepo;
+        this.emailService = emailService;
     }
 
         private boolean hasActiveRequest(Long studentId, Long trainerId) {
@@ -113,11 +118,68 @@ public class ChatController {
             "Chat disponível somente para leitura. Para enviar mensagens, é necessário ter uma solicitação ativa entre aluno e personal");
         }
 
+        boolean temporaryRejection = Boolean.TRUE.equals(dto.temporaryRejection());
+        User rejectionTarget = temporaryRejection
+                ? validateTemporaryRejection(dto.receiverId())
+                : null;
+
         ChatMessage msg = new ChatMessage();
         msg.setSenderId(dto.senderId());
         msg.setReceiverId(dto.receiverId());
         msg.setText(dto.text());
-        return repo.save(msg);
+        ChatMessage saved = repo.save(msg);
+
+        if (temporaryRejection) {
+            rejectionTarget.setStatus(UserStatus.TEMPORARILY_REJECTED);
+            rejectionTarget.setRejectionReason(dto.text());
+            userRepo.save(rejectionTarget);
+        }
+
+        sendAdminMessageEmailIfApplicable(dto.senderId(), dto.receiverId(), dto.text());
+
+        return saved;
+    }
+
+    private User validateTemporaryRejection(Long receiverId) {
+        AuthContext.requireRole("ADMIN");
+
+        User receiver = userRepo.findById(receiverId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Usuário destinatário não encontrado"
+                ));
+
+        if (receiver.getType() == UserType.admin) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Não é possível rejeitar temporariamente um administrador");
+        }
+
+        if (receiver.getStatus() != UserStatus.PENDING
+                && receiver.getStatus() != UserStatus.TEMPORARILY_REJECTED) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "A rejeição temporária é permitida apenas para usuários pendentes");
+        }
+
+        return receiver;
+    }
+
+    private void sendAdminMessageEmailIfApplicable(Long senderId, Long receiverId, String text) {
+        User sender = userRepo.findById(senderId).orElse(null);
+        if (sender == null || sender.getType() != UserType.admin) {
+            return;
+        }
+
+        User receiver = userRepo.findById(receiverId).orElse(null);
+        if (receiver == null || receiver.getType() == UserType.admin) {
+            return;
+        }
+
+        if (receiver.getStatus() != UserStatus.PENDING
+                && receiver.getStatus() != UserStatus.TEMPORARILY_REJECTED) {
+            return;
+        }
+
+        emailService.sendAdminMessageEmail(receiver, text);
     }
 
     /** Retorna todas as mensagens entre dois usuários, ordenadas por data */
@@ -360,5 +422,5 @@ public class ChatController {
         }
     }
 
-    record MessageDto(Long senderId, Long receiverId, String text) {}
+    record MessageDto(Long senderId, Long receiverId, String text, Boolean temporaryRejection) {}
 }

@@ -24,6 +24,9 @@ public class StudentRequest {
     @Column(nullable = false)
     private String studentName;
 
+    @Column
+    private String studentCidade;
+
     @Column(nullable = false)
     private String dayName;
 
@@ -80,6 +83,9 @@ public class StudentRequest {
 
     public String getStudentName() { return studentName; }
     public void setStudentName(String studentName) { this.studentName = studentName; }
+
+    public String getStudentCidade() { return studentCidade; }
+    public void setStudentCidade(String studentCidade) { this.studentCidade = studentCidade; }
 
     public String getDayName() { return dayName; }
     public void setDayName(String dayName) { this.dayName = dayName; }

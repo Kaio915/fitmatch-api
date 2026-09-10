@@ -6,3 +6,7 @@ target/
 .env.*
 .env_*
 !.env.example
+
+# Logs e artefatos de build
+*.log
+backend_log.txt

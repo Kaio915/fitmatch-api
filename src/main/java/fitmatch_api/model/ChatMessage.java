@@ -26,7 +26,7 @@ public class ChatMessage {
     @Column(name = "sent_at", updatable = false)
     private LocalDateTime sentAt;
 
-    @Column(name = "is_termination", nullable = false)
+    @Column(name = "is_termination", nullable = false, columnDefinition = "boolean default false")
     private boolean termination = false;
 
     @PrePersist

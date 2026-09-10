@@ -14,8 +14,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByCpf(String cpf);
 
+    List<User> findByCref(String cref);
+
     // Pendentes (status = PENDING)
     List<User> findByTypeAndStatus(UserType type, UserStatus status);
+
+    // Pendentes (status = PENDING ou TEMPORARILY_REJECTED), ordenados por data de criação
+    List<User> findByTypeAndStatusInOrderByCreatedAtDesc(UserType type, List<UserStatus> statuses);
 
     // Histórico: approved + rejected (status IN (...))
     List<User> findByTypeAndStatusIn(UserType type, List<UserStatus> statuses);
