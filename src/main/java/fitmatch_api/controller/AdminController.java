@@ -336,11 +336,17 @@ public class AdminController {
                         throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Não é permitido excluir conta de admin");
                 }
 
+                // Se o cadastro já havia sido rejeitado antes, o usuário já foi
+                // notificado por e-mail; não é necessário enviar outro aviso de exclusão.
+                boolean wasRejected = user.getStatus() == UserStatus.REJECTED;
+
                 user.setStatus(UserStatus.REJECTED);
                 user.setRejectionReason(ADMIN_DELETED_REASON);
                 repo.save(user);
 
-                emailService.sendAccountDeletedEmail(user);
+                if (!wasRejected) {
+                        emailService.sendAccountDeletedEmail(user);
+                }
 
                 chatMessageRepo.deleteConversation(adminId, user.getId());
         }
