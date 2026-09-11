@@ -219,7 +219,10 @@ public class AdminController {
     // ================= TEMPORARY REJECT =================
 
     @PutMapping("/temporary-reject/{id}")
-    public void temporarilyReject(@PathVariable Long id) {
+    public void temporarilyReject(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body
+    ) {
         AuthContext.requireRole("ADMIN");
 
         User user = repo
@@ -243,18 +246,25 @@ public class AdminController {
         }
 
         Long adminId = AuthContext.requirePrincipal().userId();
-        String lastMessage = chatMessageRepo
-                .findTopBySenderIdAndReceiverIdOrderBySentAtDesc(adminId, user.getId())
-                .map(ChatMessage::getText)
-                .orElse(null);
 
-        if (lastMessage == null || lastMessage.isBlank()) {
+        // 1) Motivo enviado pelo frontend tem prioridade.
+        String reason = body != null ? body.get("reason") : null;
+
+        // 2) Fallback: última mensagem enviada pelo admin para o usuário.
+        if (reason == null || reason.isBlank()) {
+            reason = chatMessageRepo
+                    .findTopBySenderIdAndReceiverIdOrderBySentAtDesc(adminId, user.getId())
+                    .map(ChatMessage::getText)
+                    .orElse(null);
+        }
+
+        if (reason == null || reason.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Envie uma mensagem antes de rejeitar temporariamente");
         }
 
         user.setStatus(UserStatus.TEMPORARILY_REJECTED);
-        user.setRejectionReason(lastMessage);
+        user.setRejectionReason(reason);
         repo.save(user);
     }
 
