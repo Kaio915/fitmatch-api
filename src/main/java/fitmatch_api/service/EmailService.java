@@ -1,6 +1,7 @@
 package fitmatch_api.service;
 
 import fitmatch_api.model.User;
+import java.text.Normalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -8,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -29,6 +31,7 @@ public class EmailService {
         this.enabled = enabled;
     }
 
+    @Async("emailTaskExecutor")
     public void sendAdminMessageEmail(User user, String adminMessage) {
         if (!enabled) {
             log.info("Envio de e-mail desabilitado (app.mail.enabled=false). Mensagem não enviada.");
@@ -46,6 +49,7 @@ public class EmailService {
         }
     }
 
+    @Async("emailTaskExecutor")
     public void sendApprovalEmail(User user) {
         if (!enabled) {
             log.info("Envio de e-mail desabilitado (app.mail.enabled=false). Mensagem não enviada.");
@@ -70,7 +74,12 @@ public class EmailService {
         }
     }
 
+    @Async("emailTaskExecutor")
     public void sendRejectionEmail(User user, String reason) {
+        if (isEmailIssueReason(reason)) {
+            log.info("E-mail de reprovação não enviado: o motivo indica problema com o e-mail informado pelo usuário.");
+            return;
+        }
         if (!enabled) {
             log.info("Envio de e-mail desabilitado (app.mail.enabled=false). Mensagem não enviada.");
             return;
@@ -97,6 +106,7 @@ public class EmailService {
         }
     }
 
+    @Async("emailTaskExecutor")
     public void sendAccountDeletedEmail(User user) {
         if (!enabled) {
             log.info("Envio de e-mail desabilitado (app.mail.enabled=false). Mensagem não enviada.");
@@ -112,8 +122,7 @@ public class EmailService {
 
         String body = "Olá, " + greeting + "!\n\n"
                 + "Sua conta no FitMatch foi EXCLUÍDA.\n\n"
-                + "Você não conseguirá mais fazer login com essa conta.\n"
-                + "Se você acredita que isso foi um engano, entre em contato com o suporte.\n\n"
+                + "Você não conseguirá mais fazer login com essa conta.\n\n"
                 + "Atenciosamente,\nEquipe FitMatch";
 
         boolean sent = send(user.getEmail(), "FitMatch - Conta excluída", body);
@@ -161,6 +170,23 @@ public class EmailService {
             log.warn("Falha ao enviar e-mail para {}: {}", to, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Detecta motivos de rejeição relacionados a e-mail incorreto/errado.
+     * Nesses casos não faz sentido enviar o e-mail de reprovação, pois o
+     * endereço informado está errado. A normalização ignora acentos, hífens
+     * e espaços para capturar variações como "e-mail", "e mail", "email".
+     */
+    private static boolean isEmailIssueReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return false;
+        }
+        String compact = Normalizer.normalize(reason, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase()
+                .replaceAll("[^a-z0-9]", "");
+        return compact.contains("email");
     }
 
     private String buildBody(User user, String adminMessage) {

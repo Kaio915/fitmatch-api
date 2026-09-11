@@ -2,9 +2,11 @@ package fitmatch_api.controller;
 
 import fitmatch_api.model.ChatMessage;
 import fitmatch_api.model.User;
+import fitmatch_api.model.UserHistory;
 import fitmatch_api.model.UserStatus;
 import fitmatch_api.model.UserType;
 import fitmatch_api.repository.ChatMessageRepository;
+import fitmatch_api.repository.UserHistoryRepository;
 import fitmatch_api.repository.UserRepository;
 import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.EmailService;
@@ -27,12 +29,14 @@ public class AdminController {
 
     private final UserRepository repo;
     private final ChatMessageRepository chatMessageRepo;
+    private final UserHistoryRepository historyRepo;
     private final EmailService emailService;
     private final Environment environment;
 
-    public AdminController(UserRepository repo, ChatMessageRepository chatMessageRepo, EmailService emailService, Environment environment) {
+    public AdminController(UserRepository repo, ChatMessageRepository chatMessageRepo, UserHistoryRepository historyRepo, EmailService emailService, Environment environment) {
         this.repo = repo;
         this.chatMessageRepo = chatMessageRepo;
+        this.historyRepo = historyRepo;
         this.emailService = emailService;
         this.environment = environment;
     }
@@ -129,6 +133,33 @@ public class AdminController {
                     u.getRejectionReason()
             );
         }
+
+        public static AdminUserResponse from(UserHistory h) {
+            return new AdminUserResponse(
+                    // Mantém o id do USUÁRIO (e não o id do registro do histórico)
+                    // para que as ações do frontend (ex.: DELETE /admin/users/{id})
+                    // continuem funcionando como antes.
+                    h.getUserId(),
+                    h.getName(),
+                    h.getEmail(),
+                    h.getType() == null
+                            ? null
+                            : h.getType().name().toLowerCase(),
+                    h.getStatus(),
+                    maskCpf(h.getCpf()),
+                    photoToBase64(h.getPhoto()),
+                    h.getObjetivos(),
+                    h.getNivel(),
+                    h.getCref(),
+                    h.getCidade(),
+                    h.getEspecialidade(),
+                    h.getExperiencia(),
+                    h.getValorHora(),
+                    h.getBio(),
+                    h.getCreatedAt(),
+                    h.getRejectionReason()
+            );
+        }
     }
 
     // ================= PENDING =================
@@ -174,6 +205,7 @@ public class AdminController {
         user.setRejectionReason(null);
 
         repo.save(user);
+        recordHistory(user, "APPROVED");
 
         emailService.sendApprovalEmail(user);
     }
@@ -210,6 +242,7 @@ public class AdminController {
         user.setRejectionReason(reason);
 
         repo.save(user);
+        recordHistory(user, "REJECTED");
 
         emailService.sendRejectionEmail(user, reason);
 
@@ -353,6 +386,7 @@ public class AdminController {
                 user.setStatus(UserStatus.REJECTED);
                 user.setRejectionReason(ADMIN_DELETED_REASON);
                 repo.save(user);
+                recordHistory(user, "DELETED");
 
                 if (!wasRejected) {
                         emailService.sendAccountDeletedEmail(user);
@@ -367,37 +401,51 @@ public class AdminController {
     public List<AdminUserResponse> getUsersHistory(
             @PathVariable UserType type,
             @RequestParam(required = false)
-            UserStatus status
+            String status
     ) {
 
         AuthContext.requireRole("ADMIN");
 
-        List<User> users;
+        List<UserHistory> history;
 
-        if (status != null) {
-
-            users =
-                    repo.findByTypeAndStatus(
-                            type,
-                            status
-                    );
-
+        if (status != null && !status.isBlank()) {
+            history = historyRepo.findByTypeAndStatusOrderByRecordedAtDesc(
+                    type,
+                    status.trim().toUpperCase()
+            );
         } else {
-
-            users =
-                    repo.findByTypeAndStatusIn(
-                            type,
-                            List.of(
-                                    UserStatus.APPROVED,
-                                    UserStatus.REJECTED
-                            )
-                    );
+            history = historyRepo.findByTypeOrderByRecordedAtDesc(type);
         }
 
-        return users
+        return history
                 .stream()
                 .map(AdminUserResponse::from)
                 .toList();
+    }
+
+    // Registra no histórico cada tentativa terminal (aprovado/rejeitado/excluído),
+    // preservando um snapshot mesmo quando a linha de "users" é reutilizada em um
+    // novo cadastro.
+    private void recordHistory(User user, String status) {
+        UserHistory h = new UserHistory();
+        h.setUserId(user.getId());
+        h.setName(user.getName());
+        h.setEmail(user.getEmail());
+        h.setCpf(user.getCpf());
+        h.setType(user.getType());
+        h.setStatus(status);
+        h.setRejectionReason(user.getRejectionReason());
+        h.setPhoto(user.getPhoto());
+        h.setObjetivos(user.getObjetivos());
+        h.setNivel(user.getNivel());
+        h.setCref(user.getCref());
+        h.setCidade(user.getCidade());
+        h.setEspecialidade(user.getEspecialidade());
+        h.setExperiencia(user.getExperiencia());
+        h.setValorHora(user.getValorHora());
+        h.setBio(user.getBio());
+        h.setCreatedAt(user.getCreatedAt());
+        historyRepo.save(h);
     }
 
 }
