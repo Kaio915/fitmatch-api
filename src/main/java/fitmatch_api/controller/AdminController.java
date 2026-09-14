@@ -82,7 +82,8 @@ public class AdminController {
             String valorHora,
             String bio,
             LocalDateTime createdAt,
-            String rejectionReason
+            String rejectionReason,
+            boolean deleted
     ) {
 
         public static AdminUserResponse from(User u) {
@@ -130,7 +131,9 @@ public class AdminController {
 
                     u.getCreatedAt(),
 
-                    u.getRejectionReason()
+                    u.getRejectionReason(),
+
+                    deletedByAdmin
             );
         }
 
@@ -157,7 +160,8 @@ public class AdminController {
                     h.getValorHora(),
                     h.getBio(),
                     h.getCreatedAt(),
-                    h.getRejectionReason()
+                    h.getRejectionReason(),
+                    h.isDeleted()
             );
         }
     }
@@ -386,7 +390,19 @@ public class AdminController {
                 user.setStatus(UserStatus.REJECTED);
                 user.setRejectionReason(ADMIN_DELETED_REASON);
                 repo.save(user);
-                recordHistory(user, "DELETED");
+
+                // Em vez de criar um novo registro "DELETED" no histórico, marca
+                // a última tentativa aprovada como excluída. Assim o mesmo item
+                // exibe "Aprovado" (cinza) ao lado de "Excluído" (vermelho).
+                UserHistory approvedEntry = historyRepo
+                        .findTopByUserIdAndStatusOrderByRecordedAtDesc(id, "APPROVED")
+                        .orElse(null);
+                if (approvedEntry != null) {
+                        approvedEntry.setDeleted(true);
+                        historyRepo.save(approvedEntry);
+                } else {
+                        recordHistory(user, "DELETED");
+                }
 
                 if (!wasRejected) {
                         emailService.sendAccountDeletedEmail(user);

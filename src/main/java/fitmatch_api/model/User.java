@@ -82,7 +82,7 @@ public class User {
 
     // ================= DATA =================
 
-    @Column(updatable = false)
+    @Column
     private LocalDateTime createdAt;
 
     @Column

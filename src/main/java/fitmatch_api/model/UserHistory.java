@@ -42,6 +42,12 @@ public class UserHistory {
     @Column(columnDefinition = "TEXT")
     private String rejectionReason;
 
+    // Indica que uma tentativa aprovada foi posteriormente excluída pelo admin.
+    // O status permanece "APPROVED", mas o histórico exibe "Aprovado" (cinza)
+    // ao lado de "Excluído" (vermelho).
+    @Column(columnDefinition = "boolean default false")
+    private boolean deleted = false;
+
     @Basic(fetch = FetchType.LAZY)
     @Column(name = "photo", columnDefinition = "bytea")
     private byte[] photo;
@@ -138,6 +144,14 @@ public class UserHistory {
 
     public void setRejectionReason(String rejectionReason) {
         this.rejectionReason = rejectionReason;
+    }
+
+    public boolean isDeleted() {
+        return deleted;
+    }
+
+    public void setDeleted(boolean deleted) {
+        this.deleted = deleted;
     }
 
     public byte[] getPhoto() {

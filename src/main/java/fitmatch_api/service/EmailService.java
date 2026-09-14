@@ -197,12 +197,12 @@ public class EmailService {
         sb.append("Olá, ").append(greeting).append("!\n\n");
         sb.append("O administrador do FitMatch enviou uma mensagem sobre o seu cadastro:\n\n");
         sb.append("\"").append(adminMessage == null ? "" : adminMessage.trim()).append("\"\n\n");
-        sb.append("O que fazer agora:\n");
-        sb.append("1. Acesse o FitMatch e na tela inicial, toque em \"Editar cadastro\".\n");
-        sb.append("2. Selecione o tipo de usuário Aluno/Personal.\n");
-        sb.append("3. Preencha os campos de email e senha (que foram colocados anteriormente no cadastro) e clique em \"Editar cadastro\".\n");
-        sb.append("4. Corrija as informações indicadas pelo administrador.\n");
-        sb.append("5. Envie o cadastro novamente.\n\n");
+        sb.append("O que fazer agora:\n\n");
+        sb.append("Acesse o FitMatch e na tela inicial, toque em seu tipo de usuário Aluno/Personal.\n\n");
+        sb.append("Aperte em \"Editar Cadastro\".\n\n");
+        sb.append("Preencha os campos de email e senha (que foram colocados anteriormente no cadastro) e clique em \"Editar cadastro\".\n\n");
+        sb.append("Corrija as informações indicadas pelo administrador.\n\n");
+        sb.append("Envie o cadastro novamente.\n\n");
         sb.append("Assim que você reenviar, o seu cadastro voltará para a análise do administrador.\n\n");
         sb.append("Atenciosamente,\nEquipe FitMatch");
         return sb.toString();
