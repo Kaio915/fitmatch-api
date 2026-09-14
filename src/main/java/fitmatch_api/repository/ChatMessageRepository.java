@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -63,5 +64,15 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     void deleteConversation(
             @Param("userId1") Long userId1,
             @Param("userId2") Long userId2
+    );
+
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM ChatMessage m WHERE " +
+           "(m.senderId = :adminId AND m.receiverId IN :userIds) OR " +
+           "(m.receiverId = :adminId AND m.senderId IN :userIds)")
+    void deleteConversationsBetweenAdminAndUsers(
+            @Param("adminId") Long adminId,
+            @Param("userIds") Collection<Long> userIds
     );
 }

@@ -12,6 +12,7 @@ import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.EmailService;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -364,51 +365,29 @@ public class AdminController {
     }
 
         @DeleteMapping("/users/{id}")
+        @Transactional
         public void deleteUser(@PathVariable Long id) {
 
                 AuthContext.requireRole("ADMIN");
 
                 Long adminId = AuthContext.requirePrincipal().userId();
 
-                User user = repo
-                                .findById(id)
-                                .orElseThrow(() ->
-                                                new ResponseStatusException(
-                                                                HttpStatus.NOT_FOUND,
-                                                                "Usuário não encontrado"
-                                                )
-                                );
+                // Exclusão definitiva do usuário. Caso ele já tenha sido removido
+                // do banco (usuário de teste órfão), apenas limpa os resíduos de
+                // histórico e conversa que apontam para esse id.
+                repo.findById(id).ifPresent(user -> {
+                        if (user.getType() == UserType.admin) {
+                                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                                                "Não é permitido excluir conta de admin");
+                        }
+                        repo.delete(user);
+                });
 
-                if (user.getType() == UserType.admin) {
-                        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Não é permitido excluir conta de admin");
-                }
+                // Remove todas as tentativas do histórico desse usuário.
+                historyRepo.deleteByUserId(id);
 
-                // Se o cadastro já havia sido rejeitado antes, o usuário já foi
-                // notificado por e-mail; não é necessário enviar outro aviso de exclusão.
-                boolean wasRejected = user.getStatus() == UserStatus.REJECTED;
-
-                user.setStatus(UserStatus.REJECTED);
-                user.setRejectionReason(ADMIN_DELETED_REASON);
-                repo.save(user);
-
-                // Em vez de criar um novo registro "DELETED" no histórico, marca
-                // a última tentativa aprovada como excluída. Assim o mesmo item
-                // exibe "Aprovado" (cinza) ao lado de "Excluído" (vermelho).
-                UserHistory approvedEntry = historyRepo
-                        .findTopByUserIdAndStatusOrderByRecordedAtDesc(id, "APPROVED")
-                        .orElse(null);
-                if (approvedEntry != null) {
-                        approvedEntry.setDeleted(true);
-                        historyRepo.save(approvedEntry);
-                } else {
-                        recordHistory(user, "DELETED");
-                }
-
-                if (!wasRejected) {
-                        emailService.sendAccountDeletedEmail(user);
-                }
-
-                chatMessageRepo.deleteConversation(adminId, user.getId());
+                // Remove o histórico de conversa entre o admin e o usuário.
+                chatMessageRepo.deleteConversation(adminId, id);
         }
 
     // ================= HISTORY =================
@@ -437,6 +416,45 @@ public class AdminController {
                 .stream()
                 .map(AdminUserResponse::from)
                 .toList();
+    }
+
+    // Limpa o histórico (e as conversas com o admin) de um tipo de usuário,
+    // podendo filtrar por status (APPROVED/REJECTED/DELETED) ou limpar tudo.
+    // Não exclui os usuários: quem está aprovado continua com a conta ativa.
+    @DeleteMapping("/history/{type}")
+    @Transactional
+    public void clearHistory(
+            @PathVariable UserType type,
+            @RequestParam(required = false) String status
+    ) {
+
+        AuthContext.requireRole("ADMIN");
+
+        Long adminId = AuthContext.requirePrincipal().userId();
+
+        String filter = (status == null || status.isBlank())
+                ? "ALL"
+                : status.trim().toUpperCase();
+
+        List<UserHistory> targets;
+        switch (filter) {
+            case "APPROVED" -> targets = historyRepo.findActiveApproved(type);
+            case "REJECTED" -> targets = historyRepo.findByTypeAndStatusOrderByRecordedAtDesc(type, "REJECTED");
+            case "DELETED" -> targets = historyRepo.findExcluded(type);
+            default -> targets = historyRepo.findByTypeOrderByRecordedAtDesc(type);
+        }
+
+        List<Long> userIds = targets.stream()
+                .map(UserHistory::getUserId)
+                .filter(id -> id != null)
+                .distinct()
+                .toList();
+
+        historyRepo.deleteAll(targets);
+
+        if (!userIds.isEmpty()) {
+                chatMessageRepo.deleteConversationsBetweenAdminAndUsers(adminId, userIds);
+        }
     }
 
     // Registra no histórico cada tentativa terminal (aprovado/rejeitado/excluído),
