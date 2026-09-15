@@ -364,6 +364,9 @@ public class AdminController {
         return m;
     }
 
+        // Exclusão definitiva do usuário (usada para remover rejeitados/excluídos
+        // do histórico). Caso o id não exista (usuário de teste órfão), apenas
+        // limpa os resíduos de histórico e conversa que apontam para esse id.
         @DeleteMapping("/users/{id}")
         @Transactional
         public void deleteUser(@PathVariable Long id) {
@@ -372,9 +375,6 @@ public class AdminController {
 
                 Long adminId = AuthContext.requirePrincipal().userId();
 
-                // Exclusão definitiva do usuário. Caso ele já tenha sido removido
-                // do banco (usuário de teste órfão), apenas limpa os resíduos de
-                // histórico e conversa que apontam para esse id.
                 repo.findById(id).ifPresent(user -> {
                         if (user.getType() == UserType.admin) {
                                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
@@ -385,6 +385,45 @@ public class AdminController {
 
                 // Remove todas as tentativas do histórico desse usuário.
                 historyRepo.deleteByUserId(id);
+
+                // Remove o histórico de conversa entre o admin e o usuário.
+                chatMessageRepo.deleteConversation(adminId, id);
+        }
+
+        // Exclui a CONTA de um usuário aprovado (soft delete): ele deixa de
+        // conseguir fazer login, mas o registro permanece no histórico marcado
+        // como "excluído" — e só então pode ser limpo pelo "limpar histórico".
+        @PutMapping("/users/{id}/exclude")
+        @Transactional
+        public void excludeAccount(@PathVariable Long id) {
+
+                AuthContext.requireRole("ADMIN");
+
+                Long adminId = AuthContext.requirePrincipal().userId();
+
+                User user = repo.findById(id).orElseThrow(() ->
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
+
+                if (user.getType() == UserType.admin) {
+                        throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                                        "Não é permitido excluir conta de admin");
+                }
+
+                // Bloqueia o login: status REJECTED com o motivo de exclusão pelo admin.
+                user.setStatus(UserStatus.REJECTED);
+                user.setRejectionReason(ADMIN_DELETED_REASON);
+                repo.save(user);
+
+                // Marca o histórico aprovado como "excluído" (deleted = true), para
+                // que ele apareça como excluído e possa ser limpo depois.
+                List<UserHistory> approved = historyRepo.findActiveApprovedByUserId(id);
+                for (UserHistory h : approved) {
+                        h.setDeleted(true);
+                        historyRepo.save(h);
+                }
+
+                // Notifica o usuário aprovado de que a conta dele foi desativada/excluída.
+                emailService.sendAccountDeletedEmail(user);
 
                 // Remove o histórico de conversa entre o admin e o usuário.
                 chatMessageRepo.deleteConversation(adminId, id);
@@ -419,8 +458,9 @@ public class AdminController {
     }
 
     // Limpa o histórico (e as conversas com o admin) de um tipo de usuário,
-    // podendo filtrar por status (APPROVED/REJECTED/DELETED) ou limpar tudo.
-    // Não exclui os usuários: quem está aprovado continua com a conta ativa.
+    // podendo filtrar por status (REJECTED/DELETED) ou limpar tudo EXCETO os
+    // aprovados. Aprovados NÃO podem ter o histórico limpo: para removê-los,
+    // use a exclusão de conta (DELETE /admin/users/{id}).
     @DeleteMapping("/history/{type}")
     @Transactional
     public void clearHistory(
@@ -436,12 +476,20 @@ public class AdminController {
                 ? "ALL"
                 : status.trim().toUpperCase();
 
+        if ("APPROVED".equals(filter)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Não é permitido limpar o histórico de usuários aprovados. " +
+                            "Use a exclusão de conta para remover um usuário aprovado."
+            );
+        }
+
         List<UserHistory> targets;
         switch (filter) {
-            case "APPROVED" -> targets = historyRepo.findActiveApproved(type);
             case "REJECTED" -> targets = historyRepo.findByTypeAndStatusOrderByRecordedAtDesc(type, "REJECTED");
             case "DELETED" -> targets = historyRepo.findExcluded(type);
-            default -> targets = historyRepo.findByTypeOrderByRecordedAtDesc(type);
+            // "ALL" (limpar tudo) não pode remover aprovados ativos.
+            default -> targets = historyRepo.findExcludingActiveApproved(type);
         }
 
         List<Long> userIds = targets.stream()

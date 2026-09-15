@@ -24,9 +24,19 @@ public interface UserHistoryRepository extends JpaRepository<UserHistory, Long> 
     @Query("SELECT h FROM UserHistory h WHERE h.type = :type AND h.status = 'APPROVED' AND h.deleted = false")
     List<UserHistory> findActiveApproved(@Param("type") UserType type);
 
+    // Aprovados ativos de um usuário específico — usados na exclusão de conta
+    // para marcar o histórico como "excluído" (deleted = true).
+    @Query("SELECT h FROM UserHistory h WHERE h.userId = :userId AND h.status = 'APPROVED' AND h.deleted = false")
+    List<UserHistory> findActiveApprovedByUserId(@Param("userId") Long userId);
+
     // Excluídos (legado DELETED ou aprovados que viraram excluídos).
     @Query("SELECT h FROM UserHistory h WHERE h.type = :type AND (h.status = 'DELETED' OR h.deleted = true)")
     List<UserHistory> findExcluded(@Param("type") UserType type);
+
+    // Tudo exceto aprovados ativos — usado no "limpar histórico" para que
+    // aprovados nunca sejam removidos do histórico (só via exclusão de conta).
+    @Query("SELECT h FROM UserHistory h WHERE h.type = :type AND NOT (h.status = 'APPROVED' AND h.deleted = false)")
+    List<UserHistory> findExcludingActiveApproved(@Param("type") UserType type);
 
     @Transactional
     void deleteByUserId(Long userId);
