@@ -20,6 +20,25 @@ public interface UserHistoryRepository extends JpaRepository<UserHistory, Long> 
 
     Optional<UserHistory> findTopByUserIdAndStatusOrderByRecordedAtDesc(Long userId, String status);
 
+    // Usada para exibir a rejeição anterior quando o mesmo email se cadastra
+    // novamente (o registro de histórico preserva o email do snapshot).
+    Optional<UserHistory> findTopByEmailAndStatusOrderByRecordedAtDesc(String email, String status);
+
+    // Último registro de qualquer status para um email — usado para verificar se
+    // a rejeição ainda é o evento terminal mais recente (não foi superada por
+    // uma aprovação/exclusão posterior).
+    Optional<UserHistory> findTopByEmailOrderByRecordedAtDesc(String email);
+
+    // Usada para exibir o aviso de "conta excluída anteriormente" quando o
+    // mesmo email/cpf faz um novo cadastro.
+    Optional<UserHistory> findTopByEmailAndDeletedOrderByRecordedAtDesc(String email, boolean deleted);
+
+    // Registros de banimento de um usuário (usados no desbanir).
+    List<UserHistory> findByUserIdAndBanned(Long userId, boolean banned);
+
+    // Registros de banimento de um tipo de usuário (usados no "limpar só banidos").
+    List<UserHistory> findByTypeAndBannedOrderByRecordedAtDesc(UserType type, boolean banned);
+
     // Aprovados "ativos" (não excluídos) — usados no "limpar só aprovados".
     @Query("SELECT h FROM UserHistory h WHERE h.type = :type AND h.status = 'APPROVED' AND h.deleted = false")
     List<UserHistory> findActiveApproved(@Param("type") UserType type);

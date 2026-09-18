@@ -107,7 +107,7 @@ public class EmailService {
     }
 
     @Async("emailTaskExecutor")
-    public void sendAccountDeletedEmail(User user) {
+    public void sendAccountDeletedEmail(User user, String reason) {
         if (!enabled) {
             log.info("Envio de e-mail desabilitado (app.mail.enabled=false). Mensagem não enviada.");
             return;
@@ -120,8 +120,11 @@ public class EmailService {
         String name = user.getName() == null ? "" : user.getName().trim();
         String greeting = name.isEmpty() ? "usuário(a)" : name;
 
+        String reasonText = (reason == null || reason.isBlank()) ? "" : reason.trim();
+
         String body = "Olá, " + greeting + "!\n\n"
                 + "Sua conta no FitMatch foi EXCLUÍDA.\n\n"
+                + (reasonText.isEmpty() ? "" : "Motivo: " + reasonText + "\n\n")
                 + "Você não conseguirá mais fazer login com essa conta.\n\n"
                 + "Atenciosamente,\nEquipe FitMatch";
 

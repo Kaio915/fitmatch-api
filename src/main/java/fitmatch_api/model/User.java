@@ -56,6 +56,11 @@ public class User {
     @Column(columnDefinition = "TEXT")
     private String rejectionReason;
 
+    // Indica que o usuário foi banido da plataforma (não pode mais acessar
+    // nem se cadastrar novamente).
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean banned = false;
+
     // ================= CAMPOS DO ALUNO =================
 
     @Column(columnDefinition = "TEXT")
@@ -131,6 +136,10 @@ public class User {
 
     public String getRejectionReason() {
         return rejectionReason;
+    }
+
+    public boolean isBanned() {
+        return banned;
     }
 
     public String getObjetivos() {
@@ -213,6 +222,10 @@ public class User {
 
     public void setRejectionReason(String rejectionReason) {
         this.rejectionReason = rejectionReason;
+    }
+
+    public void setBanned(boolean banned) {
+        this.banned = banned;
     }
 
     public void setObjetivos(String objetivos) {

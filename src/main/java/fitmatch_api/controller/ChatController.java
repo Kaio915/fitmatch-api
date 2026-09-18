@@ -188,7 +188,9 @@ public class ChatController {
             @RequestParam Long userId1,
             @RequestParam Long userId2,
             @RequestParam(required = false) Long requestId,
-            @RequestParam(required = false, defaultValue = "150") int limit) {
+            @RequestParam(required = false, defaultValue = "150") int limit,
+            @RequestParam(required = false) String since,
+            @RequestParam(required = false) String until) {
         AuthContext.requireSelfOrAdminFromAny(userId1, userId2);
 
         if (requestId == null) {
@@ -196,7 +198,8 @@ public class ChatController {
                     userId1, userId2, PageRequest.of(0, Math.max(1, limit)));
             List<ChatMessage> ordered = new ArrayList<>(latest);
             Collections.reverse(ordered);
-            return ordered;
+            List<ChatMessage> filtered = applySinceFilter(ordered, since);
+            return applyUntilFilter(filtered, until);
         }
 
         List<ChatMessage> conversation = repo.findConversation(userId1, userId2);
@@ -231,6 +234,44 @@ public class ChatController {
         return conversation.stream()
             .filter(message -> belongsToRequestWindow(message, requestId, startAt, lockAt, requestSlots))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Filtra mensagens anteriores a "since" (usado no atendimento de um usuário
+     * que se cadastrou novamente: o chat ativo mostra apenas a tentativa atual,
+     * enquanto o histórico continua preservando as mensagens antigas).
+     */
+    private List<ChatMessage> applySinceFilter(List<ChatMessage> messages, String since) {
+        if (since == null || since.isBlank()) {
+            return messages;
+        }
+        try {
+            LocalDateTime sinceTs = LocalDateTime.parse(since.trim());
+            return messages.stream()
+                    .filter(m -> m.getSentAt() != null && !m.getSentAt().isBefore(sinceTs))
+                    .collect(Collectors.toList());
+        } catch (Exception ignored) {
+            return messages;
+        }
+    }
+
+    /**
+     * Filtra mensagens posteriores a "until" (usado no histórico somente leitura:
+     * cada tentativa mostra apenas as mensagens enviadas até o evento terminal
+     * daquela tentativa — a tentativa mais recente mostra o histórico cumulativo).
+     */
+    private List<ChatMessage> applyUntilFilter(List<ChatMessage> messages, String until) {
+        if (until == null || until.isBlank()) {
+            return messages;
+        }
+        try {
+            LocalDateTime untilTs = LocalDateTime.parse(until.trim());
+            return messages.stream()
+                    .filter(m -> m.getSentAt() != null && !m.getSentAt().isAfter(untilTs))
+                    .collect(Collectors.toList());
+        } catch (Exception ignored) {
+            return messages;
+        }
     }
 
     private LocalDateTime resolveNextRequestCreatedAt(

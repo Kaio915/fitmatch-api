@@ -42,6 +42,15 @@ public class UserHistory {
     @Column(columnDefinition = "TEXT")
     private String rejectionReason;
 
+    // Última mensagem enviada pelo admin antes da rejeição (motivo complementar
+    // exibido no chat quando o mesmo email se cadastra novamente).
+    @Column(columnDefinition = "TEXT")
+    private String lastAdminMessage;
+
+    // Indica que esta tentativa corresponde a um usuário banido da plataforma.
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean banned = false;
+
     // Indica que uma tentativa aprovada foi posteriormente excluída pelo admin.
     // O status permanece "APPROVED", mas o histórico exibe "Aprovado" (cinza)
     // ao lado de "Excluído" (vermelho).
@@ -144,6 +153,22 @@ public class UserHistory {
 
     public void setRejectionReason(String rejectionReason) {
         this.rejectionReason = rejectionReason;
+    }
+
+    public String getLastAdminMessage() {
+        return lastAdminMessage;
+    }
+
+    public void setLastAdminMessage(String lastAdminMessage) {
+        this.lastAdminMessage = lastAdminMessage;
+    }
+
+    public boolean isBanned() {
+        return banned;
+    }
+
+    public void setBanned(boolean banned) {
+        this.banned = banned;
     }
 
     public boolean isDeleted() {

@@ -94,6 +94,10 @@ public class AuthController {
             );
         }
 
+        if (user.isBanned()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário banido da plataforma");
+        }
+
         if (user.getStatus() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cadastro inválido (status nulo)");
         }
@@ -417,6 +421,7 @@ public class AuthController {
     private static boolean isReusableRejected(User user) {
         return user != null
                 && user.getStatus() == UserStatus.REJECTED
+                && !user.isBanned()
                 && user.getType() != UserType.admin;
     }
 
@@ -426,6 +431,12 @@ public class AuthController {
 
         if (emailUser == null && cpfUser == null) {
             return null;
+        }
+
+        // Usuário banido não pode criar uma nova conta.
+        if ((emailUser != null && emailUser.isBanned())
+                || (cpfUser != null && cpfUser.isBanned())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário banido da plataforma");
         }
 
         if (emailUser != null && cpfUser != null) {

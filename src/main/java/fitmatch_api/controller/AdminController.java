@@ -1,11 +1,13 @@
 package fitmatch_api.controller;
 
 import fitmatch_api.model.ChatMessage;
+import fitmatch_api.model.Report;
 import fitmatch_api.model.User;
 import fitmatch_api.model.UserHistory;
 import fitmatch_api.model.UserStatus;
 import fitmatch_api.model.UserType;
 import fitmatch_api.repository.ChatMessageRepository;
+import fitmatch_api.repository.ReportRepository;
 import fitmatch_api.repository.UserHistoryRepository;
 import fitmatch_api.repository.UserRepository;
 import fitmatch_api.security.AuthContext;
@@ -17,8 +19,10 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -27,17 +31,20 @@ import java.util.Map;
 public class AdminController {
 
         private static final String ADMIN_DELETED_REASON = "Conta excluída pelo administrador";
+        private static final String BAN_REASON = "Usuário banido da plataforma por violar as diretrizes";
 
     private final UserRepository repo;
     private final ChatMessageRepository chatMessageRepo;
     private final UserHistoryRepository historyRepo;
+    private final ReportRepository reportRepo;
     private final EmailService emailService;
     private final Environment environment;
 
-    public AdminController(UserRepository repo, ChatMessageRepository chatMessageRepo, UserHistoryRepository historyRepo, EmailService emailService, Environment environment) {
+    public AdminController(UserRepository repo, ChatMessageRepository chatMessageRepo, UserHistoryRepository historyRepo, ReportRepository reportRepo, EmailService emailService, Environment environment) {
         this.repo = repo;
         this.chatMessageRepo = chatMessageRepo;
         this.historyRepo = historyRepo;
+        this.reportRepo = reportRepo;
         this.emailService = emailService;
         this.environment = environment;
     }
@@ -83,8 +90,10 @@ public class AdminController {
             String valorHora,
             String bio,
             LocalDateTime createdAt,
+            LocalDateTime recordedAt,
             String rejectionReason,
-            boolean deleted
+            boolean deleted,
+            boolean banned
     ) {
 
         public static AdminUserResponse from(User u) {
@@ -132,9 +141,13 @@ public class AdminController {
 
                     u.getCreatedAt(),
 
+                    null,
+
                     u.getRejectionReason(),
 
-                    deletedByAdmin
+                    deletedByAdmin,
+
+                    u.isBanned()
             );
         }
 
@@ -161,8 +174,10 @@ public class AdminController {
                     h.getValorHora(),
                     h.getBio(),
                     h.getCreatedAt(),
+                    h.getRecordedAt(),
                     h.getRejectionReason(),
-                    h.isDeleted()
+                    h.isDeleted(),
+                    h.isBanned()
             );
         }
     }
@@ -210,7 +225,7 @@ public class AdminController {
         user.setRejectionReason(null);
 
         repo.save(user);
-        recordHistory(user, "APPROVED");
+        recordHistory(user, "APPROVED", null, false);
 
         emailService.sendApprovalEmail(user);
     }
@@ -247,11 +262,19 @@ public class AdminController {
         user.setRejectionReason(reason);
 
         repo.save(user);
-        recordHistory(user, "REJECTED");
+
+        // Captura a última mensagem enviada pelo admin para exibi-la no chat
+        // quando o mesmo email se cadastrar novamente. A conversa é PRESERVADA
+        // para que o histórico continue consultável (chat somente leitura); o
+        // novo atendimento é separado pelo filtro "since" (createdAt do usuário).
+        String lastAdminMessage = chatMessageRepo
+                .findTopBySenderIdAndReceiverIdOrderBySentAtDesc(adminId, user.getId())
+                .map(ChatMessage::getText)
+                .orElse(null);
+
+        recordHistory(user, "REJECTED", lastAdminMessage, false);
 
         emailService.sendRejectionEmail(user, reason);
-
-        chatMessageRepo.deleteConversation(adminId, user.getId());
     }
 
     // ================= TEMPORARY REJECT =================
@@ -386,6 +409,9 @@ public class AdminController {
                 // Remove todas as tentativas do histórico desse usuário.
                 historyRepo.deleteByUserId(id);
 
+                // Remove as denúncias desse usuário.
+                reportRepo.deleteByReportedUserId(id);
+
                 // Remove o histórico de conversa entre o admin e o usuário.
                 chatMessageRepo.deleteConversation(adminId, id);
         }
@@ -395,11 +421,12 @@ public class AdminController {
         // como "excluído" — e só então pode ser limpo pelo "limpar histórico".
         @PutMapping("/users/{id}/exclude")
         @Transactional
-        public void excludeAccount(@PathVariable Long id) {
+        public void excludeAccount(
+                @PathVariable Long id,
+                @RequestBody(required = false) Map<String, String> body
+        ) {
 
                 AuthContext.requireRole("ADMIN");
-
-                Long adminId = AuthContext.requirePrincipal().userId();
 
                 User user = repo.findById(id).orElseThrow(() ->
                         new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
@@ -409,25 +436,171 @@ public class AdminController {
                                         "Não é permitido excluir conta de admin");
                 }
 
+                // Motivo específico informado pelo admin (com fallback genérico).
+                String reason = (body == null
+                                || body.get("reason") == null
+                                || body.get("reason").isBlank())
+                        ? ADMIN_DELETED_REASON
+                        : body.get("reason").trim();
+
                 // Bloqueia o login: status REJECTED com o motivo de exclusão pelo admin.
                 user.setStatus(UserStatus.REJECTED);
                 user.setRejectionReason(ADMIN_DELETED_REASON);
                 repo.save(user);
 
-                // Marca o histórico aprovado como "excluído" (deleted = true), para
-                // que ele apareça como excluído e possa ser limpo depois.
+                // Marca o histórico aprovado como "excluído" (deleted = true) e
+                // guarda o motivo específico da exclusão, para exibir no próximo
+                // cadastro do mesmo email/cpf.
                 List<UserHistory> approved = historyRepo.findActiveApprovedByUserId(id);
                 for (UserHistory h : approved) {
                         h.setDeleted(true);
+                        h.setRejectionReason(reason);
                         historyRepo.save(h);
                 }
 
-                // Notifica o usuário aprovado de que a conta dele foi desativada/excluída.
-                emailService.sendAccountDeletedEmail(user);
+                // Notifica o usuário aprovado de que a conta dele foi desativada/excluída,
+                // informando o motivo específico.
+                emailService.sendAccountDeletedEmail(user, reason);
 
-                // Remove o histórico de conversa entre o admin e o usuário.
-                chatMessageRepo.deleteConversation(adminId, id);
+                // A conversa é preservada para que o histórico continue consultável
+                // (chat somente leitura a partir da tela de histórico do admin).
+
+                // Remove as denúncias desse usuário (deixa de aparecer na lista de reportados).
+                reportRepo.deleteByReportedUserId(id);
         }
+
+        // ================= BAN =================
+
+        // Bane o usuário e, dependendo do estado atual, rejeita o cadastro (se
+        // pendente) ou exclui a conta (se aprovada). O banimento impede novos
+        // cadastros e logins com o mesmo email/cpf.
+        @PutMapping("/ban/{id}")
+        @Transactional
+        public void banUser(
+                @PathVariable Long id,
+                @RequestBody(required = false) Map<String, String> body
+        ) {
+
+                AuthContext.requireRole("ADMIN");
+                Long adminId = AuthContext.requirePrincipal().userId();
+
+                User user = repo.findById(id).orElseThrow(() ->
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
+
+                if (user.getType() == UserType.admin) {
+                        throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                                        "Não é permitido banir um administrador");
+                }
+
+                String reason = (body == null
+                                || body.get("reason") == null
+                                || body.get("reason").isBlank())
+                        ? BAN_REASON
+                        : body.get("reason").trim();
+
+                boolean wasApproved = user.getStatus() == UserStatus.APPROVED;
+
+                user.setBanned(true);
+                user.setStatus(UserStatus.REJECTED);
+                user.setRejectionReason(reason);
+                repo.save(user);
+
+                // Registra o banimento no histórico (status "REJECTED" + banned).
+                recordHistory(user, "REJECTED", null, true);
+
+                if (wasApproved) {
+                        // Exclusão automática da conta aprovada.
+                        List<UserHistory> approved = historyRepo.findActiveApprovedByUserId(id);
+                        for (UserHistory h : approved) {
+                                h.setDeleted(true);
+                                h.setRejectionReason(reason);
+                                historyRepo.save(h);
+                        }
+                        emailService.sendAccountDeletedEmail(user, reason);
+                } else {
+                        emailService.sendRejectionEmail(user, reason);
+                        chatMessageRepo.deleteConversation(adminId, id);
+                }
+        }
+
+        // Desfaz o banimento: o usuário volta a poder fazer login/cadastro.
+        // O status permanece REJECTED para que ele possa se cadastrar novamente.
+        @PutMapping("/unban/{id}")
+        @Transactional
+        public void unbanUser(@PathVariable Long id) {
+
+                AuthContext.requireRole("ADMIN");
+
+                User user = repo.findById(id).orElseThrow(() ->
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
+
+                user.setBanned(false);
+                repo.save(user);
+
+                List<UserHistory> bannedRecords = historyRepo.findByUserIdAndBanned(id, true);
+                for (UserHistory h : bannedRecords) {
+                        h.setBanned(false);
+                        historyRepo.save(h);
+                }
+        }
+
+    // ================= REPORTS (USUÁRIOS REPORTADOS) =================
+
+    // Contagem de usuários reportados ainda não visualizados pelo admin.
+    @GetMapping("/reports/count")
+    public Map<String, Object> reportedUsersCount() {
+        AuthContext.requireRole("ADMIN");
+        Map<String, Object> m = new HashMap<>();
+        m.put("count", reportRepo.countDistinctReportedUsersUnseen());
+        return m;
+    }
+
+    // Lista consolidada de usuários reportados. Cada item representa um usuário
+    // (com os mesmos campos do histórico) acrescido de "new" (denúncia não vista),
+    // "reportCount", "lastReportAt" e "lastReportReason". Ao abrir a lista, todas
+    // as denúncias são marcadas como vistas (a contagem zera, mas os registros
+    // permanecem até o usuário ser excluído).
+    @GetMapping("/reports")
+    @Transactional
+    public List<Map<String, Object>> getReportedUsers() {
+        AuthContext.requireRole("ADMIN");
+
+        List<Report> reports = reportRepo.findAllByOrderByCreatedAtDesc();
+
+        Map<Long, List<Report>> grouped = new LinkedHashMap<>();
+        for (Report r : reports) {
+            grouped.computeIfAbsent(r.getReportedUserId(), k -> new ArrayList<>()).add(r);
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map.Entry<Long, List<Report>> entry : grouped.entrySet()) {
+            Long reportedUserId = entry.getKey();
+            List<Report> userReports = entry.getValue();
+
+            User user = repo.findById(reportedUserId).orElse(null);
+            if (user == null) {
+                // Usuário já removido: descarta os registros órfãos.
+                reportRepo.deleteByReportedUserId(reportedUserId);
+                continue;
+            }
+
+            boolean isNew = userReports.stream().anyMatch(r -> !r.isSeen());
+            Report latest = userReports.get(0); // ordenado por createdAt desc
+
+            Map<String, Object> m = adminUserToMap(user);
+            m.put("new", isNew);
+            m.put("reportCount", userReports.size());
+            m.put("lastReportAt", latest.getCreatedAt() == null ? null : latest.getCreatedAt().toString());
+            m.put("lastReportReason", latest.getReason());
+            m.put("lastReportDetails", latest.getDetails());
+            result.add(m);
+        }
+
+        // Zera a contagem de "novos" após a lista ser visualizada.
+        reportRepo.markAllSeen();
+
+        return result;
+    }
 
     // ================= HISTORY =================
 
@@ -455,6 +628,79 @@ public class AdminController {
                 .stream()
                 .map(AdminUserResponse::from)
                 .toList();
+    }
+
+    // ================= PREVIOUS REJECTION =================
+
+    // Retorna a rejeição mais recente para um email (motivo + última mensagem
+    // enviada pelo admin), usada no chat para exibir o histórico da tentativa
+    // anterior quando o usuário se cadastra novamente com o mesmo email.
+    //
+    // Só retorna a rejeição se ela for o evento terminal MAIS RECENTE deste
+    // email: se houve uma aprovação (ou exclusão) depois da rejeição, o motivo
+    // antigo não faz mais sentido e não é exibido.
+    @GetMapping("/previous-rejection")
+    public Map<String, Object> getPreviousRejection(@RequestParam String email) {
+
+        AuthContext.requireRole("ADMIN");
+
+        String normalizedEmail = email == null ? "" : email.trim().toLowerCase();
+        if (normalizedEmail.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório");
+        }
+
+        UserHistory rejected = historyRepo
+                .findTopByEmailAndStatusOrderByRecordedAtDesc(normalizedEmail, "REJECTED")
+                .orElse(null);
+        UserHistory latest = historyRepo
+                .findTopByEmailOrderByRecordedAtDesc(normalizedEmail)
+                .orElse(null);
+
+        Map<String, Object> m = new HashMap<>();
+
+        if (rejected == null || latest == null
+                || !rejected.getId().equals(latest.getId())) {
+            m.put("found", false);
+            return m;
+        }
+
+        m.put("found", true);
+        m.put("email", rejected.getEmail());
+        m.put("status", rejected.getStatus());
+        m.put("rejectionReason", rejected.getRejectionReason());
+        m.put("lastAdminMessage", rejected.getLastAdminMessage());
+        m.put("recordedAt", rejected.getRecordedAt() == null ? null : rejected.getRecordedAt().toString());
+        return m;
+    }
+
+    // Retorna a exclusão de conta mais recente para um email, usada no chat
+    // para avisar o admin quando o mesmo usuário (email/cpf) cadastra-se
+    // novamente após ter a conta excluída.
+    @GetMapping("/previous-exclusion")
+    public Map<String, Object> getPreviousExclusion(@RequestParam String email) {
+
+        AuthContext.requireRole("ADMIN");
+
+        String normalizedEmail = email == null ? "" : email.trim().toLowerCase();
+        if (normalizedEmail.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório");
+        }
+
+        return historyRepo
+                .findTopByEmailAndDeletedOrderByRecordedAtDesc(normalizedEmail, true)
+                .map(h -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("found", true);
+                    m.put("email", h.getEmail());
+                    m.put("exclusionReason", h.getRejectionReason());
+                    m.put("recordedAt", h.getRecordedAt() == null ? null : h.getRecordedAt().toString());
+                    return m;
+                })
+                .orElseGet(() -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("found", false);
+                    return m;
+                });
     }
 
     // Limpa o histórico (e as conversas com o admin) de um tipo de usuário,
@@ -488,6 +734,7 @@ public class AdminController {
         switch (filter) {
             case "REJECTED" -> targets = historyRepo.findByTypeAndStatusOrderByRecordedAtDesc(type, "REJECTED");
             case "DELETED" -> targets = historyRepo.findExcluded(type);
+            case "BANNED" -> targets = historyRepo.findByTypeAndBannedOrderByRecordedAtDesc(type, true);
             // "ALL" (limpar tudo) não pode remover aprovados ativos.
             default -> targets = historyRepo.findExcludingActiveApproved(type);
         }
@@ -505,10 +752,44 @@ public class AdminController {
         }
     }
 
+    // Converte um User em um mapa com os mesmos campos usados no histórico de
+    // usuários (para reaproveitar o formato no frontend da lista de reportados).
+    private static Map<String, Object> adminUserToMap(User u) {
+        String reason = u.getRejectionReason();
+        boolean deletedByAdmin = reason != null
+                && reason.trim().equalsIgnoreCase(ADMIN_DELETED_REASON);
+        String statusLabel = deletedByAdmin
+                ? "DELETED"
+                : (u.getStatus() == null ? null : u.getStatus().name());
+
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", u.getId());
+        m.put("name", u.getName());
+        m.put("email", u.getEmail());
+        m.put("type", u.getType() == null ? null : u.getType().name().toLowerCase());
+        m.put("status", statusLabel);
+        m.put("cpf", maskCpf(u.getCpf()));
+        m.put("photoBase64", photoToBase64(u.getPhoto()));
+        m.put("objetivos", u.getObjetivos());
+        m.put("nivel", u.getNivel());
+        m.put("cref", u.getCref());
+        m.put("cidade", u.getCidade());
+        m.put("especialidade", u.getEspecialidade());
+        m.put("experiencia", u.getExperiencia());
+        m.put("valorHora", u.getValorHora());
+        m.put("bio", u.getBio());
+        m.put("createdAt", u.getCreatedAt() == null ? null : u.getCreatedAt().toString());
+        m.put("recordedAt", null);
+        m.put("rejectionReason", u.getRejectionReason());
+        m.put("deleted", deletedByAdmin);
+        m.put("banned", u.isBanned());
+        return m;
+    }
+
     // Registra no histórico cada tentativa terminal (aprovado/rejeitado/excluído),
     // preservando um snapshot mesmo quando a linha de "users" é reutilizada em um
     // novo cadastro.
-    private void recordHistory(User user, String status) {
+    private void recordHistory(User user, String status, String lastAdminMessage, boolean banned) {
         UserHistory h = new UserHistory();
         h.setUserId(user.getId());
         h.setName(user.getName());
@@ -517,6 +798,8 @@ public class AdminController {
         h.setType(user.getType());
         h.setStatus(status);
         h.setRejectionReason(user.getRejectionReason());
+        h.setLastAdminMessage(lastAdminMessage);
+        h.setBanned(banned);
         h.setPhoto(user.getPhoto());
         h.setObjetivos(user.getObjetivos());
         h.setNivel(user.getNivel());
