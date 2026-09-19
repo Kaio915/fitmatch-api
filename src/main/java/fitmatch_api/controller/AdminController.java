@@ -75,6 +75,7 @@ public class AdminController {
 
     public record AdminUserResponse(
             Long id,
+            Long historyId,
             String name,
             String email,
             String type,
@@ -108,6 +109,8 @@ public class AdminController {
             return new AdminUserResponse(
 
                     u.getId(),
+
+                    null,
 
                     u.getName(),
 
@@ -157,6 +160,7 @@ public class AdminController {
                     // para que as ações do frontend (ex.: DELETE /admin/users/{id})
                     // continuem funcionando como antes.
                     h.getUserId(),
+                    h.getId(),
                     h.getName(),
                     h.getEmail(),
                     h.getType() == null
@@ -416,6 +420,40 @@ public class AdminController {
                 chatMessageRepo.deleteConversation(adminId, id);
         }
 
+        // Exclui APENAS um registro do histórico (uma única tentativa de
+        // cadastro), sem afetar os demais registros do mesmo usuário nem a
+        // conta em si.
+        @DeleteMapping("/history-entry/{historyId}")
+        @Transactional
+        public void deleteHistoryEntry(@PathVariable Long historyId) {
+
+                AuthContext.requireRole("ADMIN");
+
+                UserHistory history = historyRepo.findById(historyId)
+                                .orElseThrow(() -> new ResponseStatusException(
+                                                HttpStatus.NOT_FOUND,
+                                                "Registro de histórico não encontrado"
+                                ));
+
+                historyRepo.delete(history);
+        }
+
+        // Exclui TODOS os registros de histórico de um usuário para um TIPO
+        // específico (aluno OU personal). Não apaga o outro tipo, não exclui a
+        // conta e não apaga as conversas — apenas limpa as tentativas daquele
+        // tipo, mantendo o histórico do outro tipo separado.
+        @DeleteMapping("/users/{id}/history")
+        @Transactional
+        public void deleteUserHistoryByType(
+                @PathVariable Long id,
+                @RequestParam UserType type
+        ) {
+
+                AuthContext.requireRole("ADMIN");
+
+                historyRepo.deleteByUserIdAndType(id, type);
+        }
+
         // Exclui a CONTA de um usuário aprovado (soft delete): ele deixa de
         // conseguir fazer login, mas o registro permanece no histórico marcado
         // como "excluído" — e só então pode ser limpo pelo "limpar histórico".
@@ -673,9 +711,10 @@ public class AdminController {
         return m;
     }
 
-    // Retorna a exclusão de conta mais recente para um email, usada no chat
-    // para avisar o admin quando o mesmo usuário (email/cpf) cadastra-se
-    // novamente após ter a conta excluída.
+    // Retorna TODAS as exclusões de conta de um email (da mais recente para a
+    // mais antiga), usada no chat para avisar o admin quando o mesmo usuário
+    // (email/cpf) cadastra-se novamente após ter a conta excluída. Exibe todos
+    // os motivos, e não apenas o da última exclusão.
     @GetMapping("/previous-exclusion")
     public Map<String, Object> getPreviousExclusion(@RequestParam String email) {
 
@@ -686,27 +725,36 @@ public class AdminController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório");
         }
 
-        return historyRepo
-                .findTopByEmailAndDeletedOrderByRecordedAtDesc(normalizedEmail, true)
-                .map(h -> {
-                    Map<String, Object> m = new HashMap<>();
-                    m.put("found", true);
-                    m.put("email", h.getEmail());
-                    m.put("exclusionReason", h.getRejectionReason());
-                    m.put("recordedAt", h.getRecordedAt() == null ? null : h.getRecordedAt().toString());
-                    return m;
-                })
-                .orElseGet(() -> {
-                    Map<String, Object> m = new HashMap<>();
-                    m.put("found", false);
-                    return m;
-                });
+        List<UserHistory> exclusions = historyRepo
+                .findByEmailAndDeletedOrderByRecordedAtDesc(normalizedEmail, true);
+
+        Map<String, Object> m = new HashMap<>();
+        if (exclusions.isEmpty()) {
+            m.put("found", false);
+            return m;
+        }
+
+        m.put("found", true);
+        m.put("email", exclusions.get(0).getEmail());
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (UserHistory h : exclusions) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("exclusionReason", h.getRejectionReason());
+            item.put("recordedAt", h.getRecordedAt() == null ? null : h.getRecordedAt().toString());
+            items.add(item);
+        }
+        m.put("exclusions", items);
+        return m;
     }
 
-    // Limpa o histórico (e as conversas com o admin) de um tipo de usuário,
-    // podendo filtrar por status (REJECTED/DELETED) ou limpar tudo EXCETO os
-    // aprovados. Aprovados NÃO podem ter o histórico limpo: para removê-los,
-    // use a exclusão de conta (DELETE /admin/users/{id}).
+    // Limpa o histórico de um tipo de usuário, podendo filtrar por status
+    // (REJECTED/DELETED) ou limpar tudo EXCETO os aprovados. Aprovados NÃO
+    // podem ter o histórico limpo: para removê-los, use a exclusão de conta.
+    //
+    // As conversas NÃO são apagadas aqui: o "limpar histórico" serve apenas
+    // para deixar a tela limpa, preservando o chat para que, caso o usuário
+    // se cadastre novamente, o admin ainda veja as mensagens antigas.
     @DeleteMapping("/history/{type}")
     @Transactional
     public void clearHistory(
@@ -715,8 +763,6 @@ public class AdminController {
     ) {
 
         AuthContext.requireRole("ADMIN");
-
-        Long adminId = AuthContext.requirePrincipal().userId();
 
         String filter = (status == null || status.isBlank())
                 ? "ALL"
@@ -739,17 +785,7 @@ public class AdminController {
             default -> targets = historyRepo.findExcludingActiveApproved(type);
         }
 
-        List<Long> userIds = targets.stream()
-                .map(UserHistory::getUserId)
-                .filter(id -> id != null)
-                .distinct()
-                .toList();
-
         historyRepo.deleteAll(targets);
-
-        if (!userIds.isEmpty()) {
-                chatMessageRepo.deleteConversationsBetweenAdminAndUsers(adminId, userIds);
-        }
     }
 
     // Converte um User em um mapa com os mesmos campos usados no histórico de

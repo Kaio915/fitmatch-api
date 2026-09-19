@@ -33,6 +33,11 @@ public interface UserHistoryRepository extends JpaRepository<UserHistory, Long> 
     // mesmo email/cpf faz um novo cadastro.
     Optional<UserHistory> findTopByEmailAndDeletedOrderByRecordedAtDesc(String email, boolean deleted);
 
+    // Todas as exclusões de conta de um email (deleted = true), da mais
+    // recente para a mais antiga — usada para listar TODOS os motivos de
+    // exclusão no chat, e não apenas o último.
+    List<UserHistory> findByEmailAndDeletedOrderByRecordedAtDesc(String email, boolean deleted);
+
     // Registros de banimento de um usuário (usados no desbanir).
     List<UserHistory> findByUserIdAndBanned(Long userId, boolean banned);
 
@@ -59,4 +64,9 @@ public interface UserHistoryRepository extends JpaRepository<UserHistory, Long> 
 
     @Transactional
     void deleteByUserId(Long userId);
+
+    // Exclui todos os registros de histórico de um usuário para um tipo
+    // específico, mantendo o histórico do outro tipo (aluno/personal) separado.
+    @Transactional
+    void deleteByUserIdAndType(Long userId, UserType type);
 }
