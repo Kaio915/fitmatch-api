@@ -57,6 +57,16 @@ public class UserHistory {
     @Column(columnDefinition = "boolean default false")
     private boolean deleted = false;
 
+    // Indica que este registro foi "limpo" da tela de histórico pelo admin.
+    // O registro permanece no banco para preservar o contexto (motivos de
+    // rejeição/exclusão) exibido no chat quando o mesmo email se cadastra de novo.
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean hidden = false;
+
+    // Data em que uma tentativa aprovada foi excluída pelo admin (soft delete).
+    // Preenchida apenas quando deleted = true.
+    private LocalDateTime deletedAt;
+
     @Basic(fetch = FetchType.LAZY)
     @Column(name = "photo", columnDefinition = "bytea")
     private byte[] photo;
@@ -177,6 +187,22 @@ public class UserHistory {
 
     public void setDeleted(boolean deleted) {
         this.deleted = deleted;
+    }
+
+    public boolean isHidden() {
+        return hidden;
+    }
+
+    public void setHidden(boolean hidden) {
+        this.hidden = hidden;
+    }
+
+    public LocalDateTime getDeletedAt() {
+        return deletedAt;
+    }
+
+    public void setDeletedAt(LocalDateTime deletedAt) {
+        this.deletedAt = deletedAt;
     }
 
     public byte[] getPhoto() {

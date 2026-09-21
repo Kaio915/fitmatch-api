@@ -5,7 +5,6 @@ import fitmatch_api.model.UserType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -62,11 +61,30 @@ public interface UserHistoryRepository extends JpaRepository<UserHistory, Long> 
     @Query("SELECT h FROM UserHistory h WHERE h.type = :type AND NOT (h.status = 'APPROVED' AND h.deleted = false)")
     List<UserHistory> findExcludingActiveApproved(@Param("type") UserType type);
 
-    @Transactional
-    void deleteByUserId(Long userId);
+    // Histórico visível na tela (não "limpo").
+    List<UserHistory> findByTypeAndHiddenOrderByRecordedAtDesc(UserType type, boolean hidden);
 
-    // Exclui todos os registros de histórico de um usuário para um tipo
-    // específico, mantendo o histórico do outro tipo (aluno/personal) separado.
-    @Transactional
-    void deleteByUserIdAndType(Long userId, UserType type);
+    List<UserHistory> findByTypeAndStatusAndHiddenOrderByRecordedAtDesc(UserType type, String status, boolean hidden);
+
+    // Todas as rejeições de um email (mesmo que já tenham sido "limpas" da tela).
+    List<UserHistory> findByEmailAndStatusOrderByRecordedAtDesc(String email, String status);
+
+    // Último evento terminal que NÃO é uma rejeição (aprovação/exclusão), usado
+    // para descartar rejeições antigas superadas por uma aprovação/exclusão.
+    @Query("SELECT h FROM UserHistory h WHERE h.email = :email AND h.status <> 'REJECTED' ORDER BY h.recordedAt DESC")
+    Optional<UserHistory> findLatestNonRejection(@Param("email") String email);
+
+    // Todas as exclusões de um email (deleted = true ou status legado DELETED).
+    @Query("SELECT h FROM UserHistory h WHERE h.email = :email AND (h.deleted = true OR h.status = 'DELETED') ORDER BY h.recordedAt DESC")
+    List<UserHistory> findExclusionsByEmail(@Param("email") String email);
+
+    // Todos os registros de histórico de um usuário — usados para ocultar
+    // (hidden = true) em vez de apagar, preservando o motivo da rejeição/exclusão
+    // que é exibido no chat quando o mesmo email/cpf se cadastra novamente.
+    List<UserHistory> findByUserId(Long userId);
+
+    // Todos os registros de histórico de um usuário para um tipo específico
+    // (aluno OU personal), usados para ocultar em vez de apagar, mantendo o
+    // histórico do outro tipo separado.
+    List<UserHistory> findByUserIdAndType(Long userId, UserType type);
 }

@@ -71,6 +71,17 @@ public class AdminController {
         return Base64.getEncoder().encodeToString(photo);
     }
 
+    // Copia a foto do usuário de forma defensiva: como o campo photo é LAZY,
+    // um acesso fora de sessão pode lançar LazyInitializationException. Aqui
+    // preferimos gravar null no histórico do que derrubar a requisição.
+    private static byte[] userPhotoOrNull(User user) {
+        try {
+            return user.getPhoto();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     // ================= DTO =================
 
     public record AdminUserResponse(
@@ -155,6 +166,14 @@ public class AdminController {
         }
 
         public static AdminUserResponse from(UserHistory h) {
+            return from(h, null);
+        }
+
+        public static AdminUserResponse from(UserHistory h, byte[] fallbackPhoto) {
+            byte[] photo = h.getPhoto();
+            if ((photo == null || photo.length == 0) && fallbackPhoto != null && fallbackPhoto.length > 0) {
+                photo = fallbackPhoto;
+            }
             return new AdminUserResponse(
                     // Mantém o id do USUÁRIO (e não o id do registro do histórico)
                     // para que as ações do frontend (ex.: DELETE /admin/users/{id})
@@ -168,7 +187,7 @@ public class AdminController {
                             : h.getType().name().toLowerCase(),
                     h.getStatus(),
                     maskCpf(h.getCpf()),
-                    photoToBase64(h.getPhoto()),
+                    photoToBase64(photo),
                     h.getObjetivos(),
                     h.getNivel(),
                     h.getCref(),
@@ -394,6 +413,8 @@ public class AdminController {
         // Exclusão definitiva do usuário (usada para remover rejeitados/excluídos
         // do histórico). Caso o id não exista (usuário de teste órfão), apenas
         // limpa os resíduos de histórico e conversa que apontam para esse id.
+        // O histórico é apenas OCULTADO (hidden = true), preservando o motivo da
+        // rejeição/exclusão para exibir no chat em um novo cadastro do mesmo email.
         @DeleteMapping("/users/{id}")
         @Transactional
         public void deleteUser(@PathVariable Long id) {
@@ -410,8 +431,14 @@ public class AdminController {
                         repo.delete(user);
                 });
 
-                // Remove todas as tentativas do histórico desse usuário.
-                historyRepo.deleteByUserId(id);
+                // Em vez de apagar as tentativas do histórico, marca como "oculto"
+                // (hidden = true) para preservar o motivo da rejeição/exclusão e
+                // exibi-lo no chat caso o mesmo email/cpf se cadastre novamente.
+                List<UserHistory> histories = historyRepo.findByUserId(id);
+                for (UserHistory h : histories) {
+                        h.setHidden(true);
+                }
+                historyRepo.saveAll(histories);
 
                 // Remove as denúncias desse usuário.
                 reportRepo.deleteByReportedUserId(id);
@@ -420,9 +447,10 @@ public class AdminController {
                 chatMessageRepo.deleteConversation(adminId, id);
         }
 
-        // Exclui APENAS um registro do histórico (uma única tentativa de
+        // Oculta APENAS um registro do histórico (uma única tentativa de
         // cadastro), sem afetar os demais registros do mesmo usuário nem a
-        // conta em si.
+        // conta em si. O registro permanece no banco para preservar o motivo
+        // da rejeição/exclusão exibido no chat.
         @DeleteMapping("/history-entry/{historyId}")
         @Transactional
         public void deleteHistoryEntry(@PathVariable Long historyId) {
@@ -435,13 +463,18 @@ public class AdminController {
                                                 "Registro de histórico não encontrado"
                                 ));
 
-                historyRepo.delete(history);
+                // Em vez de apagar, marca como "oculto" (hidden = true) para
+                // preservar o motivo da rejeição/exclusão exibido no chat quando
+                // o mesmo email/cpf se cadastra novamente.
+                history.setHidden(true);
+                historyRepo.save(history);
         }
 
-        // Exclui TODOS os registros de histórico de um usuário para um TIPO
+        // Oculta TODOS os registros de histórico de um usuário para um TIPO
         // específico (aluno OU personal). Não apaga o outro tipo, não exclui a
         // conta e não apaga as conversas — apenas limpa as tentativas daquele
-        // tipo, mantendo o histórico do outro tipo separado.
+        // tipo, mantendo o histórico do outro tipo separado. Os registros são
+        // ocultados (hidden = true) para preservar o motivo da rejeição/exclusão.
         @DeleteMapping("/users/{id}/history")
         @Transactional
         public void deleteUserHistoryByType(
@@ -451,7 +484,14 @@ public class AdminController {
 
                 AuthContext.requireRole("ADMIN");
 
-                historyRepo.deleteByUserIdAndType(id, type);
+                // Em vez de apagar, marca como "oculto" (hidden = true) para
+                // preservar os motivos de rejeição/exclusão exibidos no chat quando
+                // o mesmo email/cpf se cadastra novamente.
+                List<UserHistory> histories = historyRepo.findByUserIdAndType(id, type);
+                for (UserHistory h : histories) {
+                        h.setHidden(true);
+                }
+                historyRepo.saveAll(histories);
         }
 
         // Exclui a CONTA de um usuário aprovado (soft delete): ele deixa de
@@ -492,6 +532,7 @@ public class AdminController {
                 List<UserHistory> approved = historyRepo.findActiveApprovedByUserId(id);
                 for (UserHistory h : approved) {
                         h.setDeleted(true);
+                        h.setDeletedAt(LocalDateTime.now());
                         h.setRejectionReason(reason);
                         historyRepo.save(h);
                 }
@@ -643,6 +684,7 @@ public class AdminController {
     // ================= HISTORY =================
 
     @GetMapping("/users/{type}")
+    @Transactional(readOnly = true)
     public List<AdminUserResponse> getUsersHistory(
             @PathVariable UserType type,
             @RequestParam(required = false)
@@ -654,18 +696,33 @@ public class AdminController {
         List<UserHistory> history;
 
         if (status != null && !status.isBlank()) {
-            history = historyRepo.findByTypeAndStatusOrderByRecordedAtDesc(
+            history = historyRepo.findByTypeAndStatusAndHiddenOrderByRecordedAtDesc(
                     type,
-                    status.trim().toUpperCase()
+                    status.trim().toUpperCase(),
+                    false
             );
         } else {
-            history = historyRepo.findByTypeOrderByRecordedAtDesc(type);
+            history = historyRepo.findByTypeAndHiddenOrderByRecordedAtDesc(type, false);
         }
 
         return history
                 .stream()
-                .map(AdminUserResponse::from)
+                .map(h -> AdminUserResponse.from(h, fallbackPhoto(h.getUserId())))
                 .toList();
+    }
+
+    // Quando um registro de histórico foi gravado sem foto (ex.: backfill de
+    // usuários antigos ou tentativa anterior sem foto), reutiliza a foto atual
+    // do usuário para que o admin nunca veja o histórico sem imagem.
+    private byte[] fallbackPhoto(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        try {
+            return repo.findById(userId).map(User::getPhoto).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     // ================= PREVIOUS REJECTION =================
@@ -687,27 +744,51 @@ public class AdminController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório");
         }
 
-        UserHistory rejected = historyRepo
-                .findTopByEmailAndStatusOrderByRecordedAtDesc(normalizedEmail, "REJECTED")
-                .orElse(null);
         UserHistory latest = historyRepo
                 .findTopByEmailOrderByRecordedAtDesc(normalizedEmail)
                 .orElse(null);
 
         Map<String, Object> m = new HashMap<>();
 
-        if (rejected == null || latest == null
-                || !rejected.getId().equals(latest.getId())) {
+        boolean latestIsRejection = latest != null
+                && "REJECTED".equals(latest.getStatus())
+                && !latest.isDeleted();
+        if (!latestIsRejection) {
             m.put("found", false);
             return m;
         }
 
+        // Descarta rejeições antigas que foram superadas por uma aprovação/exclusão.
+        UserHistory latestNonRejection = historyRepo
+                .findLatestNonRejection(normalizedEmail)
+                .orElse(null);
+        LocalDateTime cutoff = latestNonRejection == null
+                ? null
+                : latestNonRejection.getRecordedAt();
+
+        List<UserHistory> rejections = historyRepo
+                .findByEmailAndStatusOrderByRecordedAtDesc(normalizedEmail, "REJECTED");
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (int i = rejections.size() - 1; i >= 0; i--) {
+            UserHistory h = rejections.get(i);
+            if (cutoff != null && (h.getRecordedAt() == null || !h.getRecordedAt().isAfter(cutoff))) {
+                continue;
+            }
+            Map<String, Object> item = new HashMap<>();
+            item.put("rejectionReason", h.getRejectionReason());
+            item.put("lastAdminMessage", h.getLastAdminMessage());
+            item.put("recordedAt", h.getRecordedAt() == null ? null : h.getRecordedAt().toString());
+            items.add(item);
+        }
+
         m.put("found", true);
-        m.put("email", rejected.getEmail());
-        m.put("status", rejected.getStatus());
-        m.put("rejectionReason", rejected.getRejectionReason());
-        m.put("lastAdminMessage", rejected.getLastAdminMessage());
-        m.put("recordedAt", rejected.getRecordedAt() == null ? null : rejected.getRecordedAt().toString());
+        m.put("email", latest.getEmail());
+        m.put("status", "REJECTED");
+        m.put("rejectionReason", latest.getRejectionReason());
+        m.put("lastAdminMessage", latest.getLastAdminMessage());
+        m.put("recordedAt", latest.getRecordedAt() == null ? null : latest.getRecordedAt().toString());
+        m.put("rejections", items);
         return m;
     }
 
@@ -725,22 +806,33 @@ public class AdminController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório");
         }
 
-        List<UserHistory> exclusions = historyRepo
-                .findByEmailAndDeletedOrderByRecordedAtDesc(normalizedEmail, true);
+        UserHistory latest = historyRepo
+                .findTopByEmailOrderByRecordedAtDesc(normalizedEmail)
+                .orElse(null);
 
         Map<String, Object> m = new HashMap<>();
-        if (exclusions.isEmpty()) {
+
+        boolean latestIsExclusion = latest != null
+                && (latest.isDeleted() || "DELETED".equals(latest.getStatus()));
+        if (!latestIsExclusion) {
             m.put("found", false);
             return m;
         }
 
+        List<UserHistory> exclusions = historyRepo
+                .findExclusionsByEmail(normalizedEmail);
+
         m.put("found", true);
-        m.put("email", exclusions.get(0).getEmail());
+        m.put("email", latest.getEmail());
 
         List<Map<String, Object>> items = new ArrayList<>();
-        for (UserHistory h : exclusions) {
+        for (int i = exclusions.size() - 1; i >= 0; i--) {
+            UserHistory h = exclusions.get(i);
             Map<String, Object> item = new HashMap<>();
             item.put("exclusionReason", h.getRejectionReason());
+            item.put("excludedAt", h.getDeletedAt() == null
+                    ? (h.getRecordedAt() == null ? null : h.getRecordedAt().toString())
+                    : h.getDeletedAt().toString());
             item.put("recordedAt", h.getRecordedAt() == null ? null : h.getRecordedAt().toString());
             items.add(item);
         }
@@ -785,7 +877,13 @@ public class AdminController {
             default -> targets = historyRepo.findExcludingActiveApproved(type);
         }
 
-        historyRepo.deleteAll(targets);
+        // Em vez de apagar, marca como "oculto" (hidden = true). Assim a tela de
+        // histórico fica limpa, mas os motivos de rejeição/exclusão continuam
+        // disponíveis para exibir no chat quando o mesmo email se cadastrar de novo.
+        for (UserHistory h : targets) {
+            h.setHidden(true);
+        }
+        historyRepo.saveAll(targets);
     }
 
     // Converte um User em um mapa com os mesmos campos usados no histórico de
@@ -836,7 +934,7 @@ public class AdminController {
         h.setRejectionReason(user.getRejectionReason());
         h.setLastAdminMessage(lastAdminMessage);
         h.setBanned(banned);
-        h.setPhoto(user.getPhoto());
+        h.setPhoto(userPhotoOrNull(user));
         h.setObjetivos(user.getObjetivos());
         h.setNivel(user.getNivel());
         h.setCref(user.getCref());
