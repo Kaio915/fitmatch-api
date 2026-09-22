@@ -627,6 +627,11 @@ public class AdminController {
                 List<UserHistory> bannedRecords = historyRepo.findByUserIdAndBanned(id, true);
                 for (UserHistory h : bannedRecords) {
                         h.setBanned(false);
+                        // Oculta o registro de banimento ao desbanir, para que o
+                        // histórico volte ao estado anterior ao banimento (sem
+                        // duplicar o campo do usuário). O motivo é preservado
+                        // (bannedReason) para exibir no chat em um novo cadastro.
+                        h.setHidden(true);
                         historyRepo.save(h);
                 }
         }
