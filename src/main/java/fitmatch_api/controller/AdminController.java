@@ -105,7 +105,8 @@ public class AdminController {
             LocalDateTime recordedAt,
             String rejectionReason,
             boolean deleted,
-            boolean banned
+            boolean banned,
+            String currentStatus
     ) {
 
         public static AdminUserResponse from(User u) {
@@ -161,15 +162,17 @@ public class AdminController {
 
                     deletedByAdmin,
 
-                    u.isBanned()
+                    u.isBanned(),
+
+                    u.getStatus() == null ? null : u.getStatus().name()
             );
         }
 
         public static AdminUserResponse from(UserHistory h) {
-            return from(h, null);
+            return from(h, null, null);
         }
 
-        public static AdminUserResponse from(UserHistory h, byte[] fallbackPhoto) {
+        public static AdminUserResponse from(UserHistory h, byte[] fallbackPhoto, String currentStatus) {
             byte[] photo = h.getPhoto();
             if ((photo == null || photo.length == 0) && fallbackPhoto != null && fallbackPhoto.length > 0) {
                 photo = fallbackPhoto;
@@ -200,7 +203,8 @@ public class AdminController {
                     h.getRecordedAt(),
                     h.getRejectionReason(),
                     h.isDeleted(),
-                    h.isBanned()
+                    h.isBanned(),
+                    currentStatus
             );
         }
     }
@@ -712,7 +716,7 @@ public class AdminController {
 
         return history
                 .stream()
-                .map(h -> AdminUserResponse.from(h, fallbackPhoto(h.getUserId())))
+                .map(h -> AdminUserResponse.from(h, fallbackPhoto(h.getUserId()), currentStatusOf(h.getUserId())))
                 .toList();
     }
 
@@ -725,6 +729,22 @@ public class AdminController {
         }
         try {
             return repo.findById(userId).map(User::getPhoto).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    // Status ATUAL do usuário (não o status do registro de histórico). Usado pelo
+    // frontend para bloquear o botão "Banir" no histórico quando o usuário voltou
+    // a ficar PENDENTE/em análise — nesse caso o banimento deve ser feito pelo chat.
+    private String currentStatusOf(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        try {
+            return repo.findById(userId)
+                    .map(u -> u.getStatus() == null ? null : u.getStatus().name())
+                    .orElse(null);
         } catch (RuntimeException e) {
             return null;
         }
