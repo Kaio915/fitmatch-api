@@ -106,7 +106,8 @@ public class AdminController {
             String rejectionReason,
             boolean deleted,
             boolean banned,
-            String currentStatus
+            String currentStatus,
+            boolean currentBanned
     ) {
 
         public static AdminUserResponse from(User u) {
@@ -164,15 +165,17 @@ public class AdminController {
 
                     u.isBanned(),
 
-                    u.getStatus() == null ? null : u.getStatus().name()
+                    u.getStatus() == null ? null : u.getStatus().name(),
+
+                    u.isBanned()
             );
         }
 
         public static AdminUserResponse from(UserHistory h) {
-            return from(h, null, null);
+            return from(h, null, null, false);
         }
 
-        public static AdminUserResponse from(UserHistory h, byte[] fallbackPhoto, String currentStatus) {
+        public static AdminUserResponse from(UserHistory h, byte[] fallbackPhoto, String currentStatus, boolean currentBanned) {
             byte[] photo = h.getPhoto();
             if ((photo == null || photo.length == 0) && fallbackPhoto != null && fallbackPhoto.length > 0) {
                 photo = fallbackPhoto;
@@ -204,7 +207,8 @@ public class AdminController {
                     h.getRejectionReason(),
                     h.isDeleted(),
                     h.isBanned(),
-                    currentStatus
+                    currentStatus,
+                    currentBanned
             );
         }
     }
@@ -716,7 +720,7 @@ public class AdminController {
 
         return history
                 .stream()
-                .map(h -> AdminUserResponse.from(h, fallbackPhoto(h.getUserId()), currentStatusOf(h.getUserId())))
+                .map(h -> AdminUserResponse.from(h, fallbackPhoto(h.getUserId()), currentStatusOf(h.getUserId()), currentBannedOf(h.getUserId())))
                 .toList();
     }
 
@@ -747,6 +751,20 @@ public class AdminController {
                     .orElse(null);
         } catch (RuntimeException e) {
             return null;
+        }
+    }
+
+    // Indica se o usuário está ATUALMENTE banido (não o registro de histórico).
+    // Usado pelo frontend para desabilitar o botão "Banir" em registros antigos
+    // (ex.: conta excluída) quando o usuário já foi banido em outra tentativa.
+    private boolean currentBannedOf(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        try {
+            return repo.findById(userId).map(User::isBanned).orElse(false);
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 
