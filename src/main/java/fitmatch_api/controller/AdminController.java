@@ -107,7 +107,8 @@ public class AdminController {
             boolean deleted,
             boolean banned,
             String currentStatus,
-            boolean currentBanned
+            boolean currentBanned,
+            String bannedReason
     ) {
 
         public static AdminUserResponse from(User u) {
@@ -167,7 +168,9 @@ public class AdminController {
 
                     u.getStatus() == null ? null : u.getStatus().name(),
 
-                    u.isBanned()
+                    u.isBanned(),
+
+                    null
             );
         }
 
@@ -208,7 +211,8 @@ public class AdminController {
                     h.isDeleted(),
                     h.isBanned(),
                     currentStatus,
-                    currentBanned
+                    currentBanned,
+                    h.getBannedReason()
             );
         }
     }
@@ -586,17 +590,18 @@ public class AdminController {
                         : body.get("reason").trim();
 
                 boolean wasApproved = user.getStatus() == UserStatus.APPROVED;
+                boolean wasPending = user.getStatus() == UserStatus.PENDING
+                                || user.getStatus() == UserStatus.TEMPORARILY_REJECTED;
 
                 user.setBanned(true);
                 user.setStatus(UserStatus.REJECTED);
                 user.setRejectionReason(reason);
                 repo.save(user);
 
-                // Registra o banimento no histórico (status "REJECTED" + banned).
-                recordHistory(user, "REJECTED", null, true);
-
                 if (wasApproved) {
-                        // Exclusão automática da conta aprovada.
+                        // Exclusão automática da conta aprovada: cria o registro de
+                        // banimento e marca o histórico aprovado como excluído.
+                        recordHistory(user, "REJECTED", null, true);
                         List<UserHistory> approved = historyRepo.findActiveApprovedByUserId(id);
                         for (UserHistory h : approved) {
                                 h.setDeleted(true);
@@ -604,7 +609,15 @@ public class AdminController {
                                 historyRepo.save(h);
                         }
                         emailService.sendAccountDeletedEmail(user, reason);
+                } else if (wasPending) {
+                        // Novo cadastro pendente → cria um registro de banimento.
+                        createBanRecord(user, reason);
+                        emailService.sendRejectionEmail(user, reason);
+                        chatMessageRepo.deleteConversation(adminId, id);
                 } else {
+                        // Usuário já rejeitado → marca o registro mais recente como
+                        // banido (sem duplicar o usuário no histórico).
+                        markLatestAsBanned(user, reason);
                         emailService.sendRejectionEmail(user, reason);
                         chatMessageRepo.deleteConversation(adminId, id);
                 }
@@ -622,16 +635,23 @@ public class AdminController {
                         new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
 
                 user.setBanned(false);
+                // Remove o motivo do banimento que ficou gravado como motivo de
+                // rejeição ao banir, para que não apareça após o desbanimento.
+                user.setRejectionReason(null);
                 repo.save(user);
 
                 List<UserHistory> bannedRecords = historyRepo.findByUserIdAndBanned(id, true);
                 for (UserHistory h : bannedRecords) {
+                        // Reverte o banimento e remove o motivo do banimento, para
+                        // que ele deixe de aparecer no campo após o desbanimento.
+                        if (h.getBannedReason() != null
+                                        && h.getBannedReason().equals(h.getRejectionReason())) {
+                                // O motivo de rejeição era, na verdade, o motivo do
+                                // banimento duplicado; limpa para não exibi-lo.
+                                h.setRejectionReason(null);
+                        }
                         h.setBanned(false);
-                        // Oculta o registro de banimento ao desbanir, para que o
-                        // histórico volte ao estado anterior ao banimento (sem
-                        // duplicar o campo do usuário). O motivo é preservado
-                        // (bannedReason) para exibir no chat em um novo cadastro.
-                        h.setHidden(true);
+                        h.setBannedReason(null);
                         historyRepo.save(h);
                 }
         }
@@ -879,7 +899,8 @@ public class AdminController {
     // Retorna TODOS os banimentos anteriores de um email (da mais recente para
     // a mais antiga), usados no chat para avisar o admin quando o mesmo usuário
     // (email/cpf) se cadastra novamente após ter sido banido e desbanido.
-    // O motivo é preservado (bannedReason) mesmo após o desbanimento.
+    // O motivo é removido ao desbanir, então só retorna banimentos que ainda
+    // não foram desfeitos.
     @GetMapping("/previous-ban")
     public Map<String, Object> getPreviousBan(@RequestParam String email) {
 
@@ -1023,6 +1044,48 @@ public class AdminController {
         h.setBio(user.getBio());
         h.setCreatedAt(user.getCreatedAt());
         historyRepo.save(h);
+    }
+
+    // Cria um registro de banimento para um cadastro pendente (sem registro
+    // terminal anterior). O motivo de rejeição fica nulo (banimento ≠ rejeição).
+    private void createBanRecord(User user, String reason) {
+        UserHistory h = new UserHistory();
+        h.setUserId(user.getId());
+        h.setName(user.getName());
+        h.setEmail(user.getEmail());
+        h.setCpf(user.getCpf());
+        h.setType(user.getType());
+        h.setStatus("REJECTED");
+        h.setRejectionReason(null);
+        h.setLastAdminMessage(null);
+        h.setBanned(true);
+        h.setBannedReason(reason);
+        h.setPhoto(userPhotoOrNull(user));
+        h.setObjetivos(user.getObjetivos());
+        h.setNivel(user.getNivel());
+        h.setCref(user.getCref());
+        h.setCidade(user.getCidade());
+        h.setEspecialidade(user.getEspecialidade());
+        h.setExperiencia(user.getExperiencia());
+        h.setValorHora(user.getValorHora());
+        h.setBio(user.getBio());
+        h.setCreatedAt(user.getCreatedAt());
+        historyRepo.save(h);
+    }
+
+    // Marca o registro mais recente do usuário como banido, sem criar um novo
+    // registro (evita duplicar o usuário no histórico). Mantém o motivo de
+    // rejeição original (se houver).
+    private void markLatestAsBanned(User user, String reason) {
+        UserHistory latest = historyRepo.findTopByUserIdOrderByRecordedAtDesc(user.getId()).orElse(null);
+        if (latest == null) {
+            createBanRecord(user, reason);
+            return;
+        }
+        latest.setBanned(true);
+        latest.setBannedReason(reason);
+        latest.setHidden(false);
+        historyRepo.save(latest);
     }
 
 }

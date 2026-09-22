@@ -51,8 +51,8 @@ public class UserHistory {
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean banned = false;
 
-    // Motivo do banimento. É PRESERVADO mesmo após o desbanimento, para exibir
-    // no chat quando o mesmo email/cpf se cadastra novamente.
+    // Motivo do banimento. É removido ao desbanir o usuário (o campo deixa de
+    // ser exibido após o desbanimento).
     @Column(columnDefinition = "TEXT")
     private String bannedReason;
 

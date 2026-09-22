@@ -81,14 +81,22 @@ public interface UserHistoryRepository extends JpaRepository<UserHistory, Long> 
     @Query("SELECT h FROM UserHistory h WHERE h.email = :email AND (h.deleted = true OR h.status = 'DELETED') ORDER BY h.recordedAt DESC")
     List<UserHistory> findExclusionsByEmail(@Param("email") String email);
 
-    // Rejeições "normais" de um email (exclui os registros de banimento, que têm
-    // bannedReason preenchido) — usadas no "previous-rejection".
-    @Query("SELECT h FROM UserHistory h WHERE h.email = :email AND h.status = 'REJECTED' AND h.bannedReason IS NULL ORDER BY h.recordedAt DESC")
+    // Rejeições "normais" de um email (com motivo preenchido) — usadas no
+    // "previous-rejection". Exclui registros de banimento desbanidos, que após
+    // a correção ficam com bannedReason nulo e rejectionReason nulo.
+    @Query("SELECT h FROM UserHistory h WHERE h.email = :email AND h.status = 'REJECTED' AND h.bannedReason IS NULL AND h.rejectionReason IS NOT NULL ORDER BY h.recordedAt DESC")
     List<UserHistory> findRejectionsByEmail(@Param("email") String email);
 
-    // Banimentos de um email (bannedReason preenchido) — usados no "previous-ban".
-    @Query("SELECT h FROM UserHistory h WHERE h.email = :email AND h.bannedReason IS NOT NULL ORDER BY h.recordedAt DESC")
+    // Banimentos de um email que ainda estão ATIVOS (banned = true) — usados no
+    // "previous-ban". Registros já desbanidos (banned = false) não são exibidos,
+    // mesmo que ainda tenham o motivo gravado (dados antigos preservados antes
+    // da correção do desbanimento).
+    @Query("SELECT h FROM UserHistory h WHERE h.email = :email AND h.banned = true AND h.bannedReason IS NOT NULL ORDER BY h.recordedAt DESC")
     List<UserHistory> findBansByEmail(@Param("email") String email);
+
+    // Último registro de qualquer status de um usuário — usado para marcar como
+    // banido o registro da tentativa atual (sem duplicar o usuário no histórico).
+    Optional<UserHistory> findTopByUserIdOrderByRecordedAtDesc(Long userId);
 
     // Todos os registros de histórico de um usuário — usados para ocultar
     // (hidden = true) em vez de apagar, preservando o motivo da rejeição/exclusão
