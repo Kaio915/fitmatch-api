@@ -696,11 +696,16 @@ public class AdminController {
         List<UserHistory> history;
 
         if (status != null && !status.isBlank()) {
-            history = historyRepo.findByTypeAndStatusAndHiddenOrderByRecordedAtDesc(
-                    type,
-                    status.trim().toUpperCase(),
-                    false
-            );
+            String normalized = status.trim().toUpperCase();
+            if ("BANNED".equals(normalized)) {
+                history = historyRepo.findByTypeAndBannedAndHiddenOrderByRecordedAtDesc(type, true, false);
+            } else {
+                history = historyRepo.findByTypeAndStatusAndHiddenOrderByRecordedAtDesc(
+                        type,
+                        normalized,
+                        false
+                );
+            }
         } else {
             history = historyRepo.findByTypeAndHiddenOrderByRecordedAtDesc(type, false);
         }
@@ -731,9 +736,10 @@ public class AdminController {
     // enviada pelo admin), usada no chat para exibir o histórico da tentativa
     // anterior quando o usuário se cadastra novamente com o mesmo email.
     //
-    // Só retorna a rejeição se ela for o evento terminal MAIS RECENTE deste
-    // email: se houve uma aprovação (ou exclusão) depois da rejeição, o motivo
-    // antigo não faz mais sentido e não é exibido.
+    // Exibe a rejeição sempre que houver alguma no histórico deste email,
+    // independentemente de ter sido seguida por uma aprovação/exclusão. Assim o
+    // admin vê o motivo da rejeição E o motivo da exclusão (via previous-exclusion)
+    // quando ambos aconteceram.
     @GetMapping("/previous-rejection")
     public Map<String, Object> getPreviousRejection(@RequestParam String email) {
 
@@ -744,37 +750,21 @@ public class AdminController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório");
         }
 
-        UserHistory latest = historyRepo
-                .findTopByEmailOrderByRecordedAtDesc(normalizedEmail)
-                .orElse(null);
+        // Todas as rejeições do email (da mais recente para a mais antiga).
+        List<UserHistory> rejections = historyRepo
+                .findByEmailAndStatusOrderByRecordedAtDesc(normalizedEmail, "REJECTED");
 
         Map<String, Object> m = new HashMap<>();
-
-        boolean latestIsRejection = latest != null
-                && "REJECTED".equals(latest.getStatus())
-                && !latest.isDeleted();
-        if (!latestIsRejection) {
+        if (rejections.isEmpty()) {
             m.put("found", false);
             return m;
         }
 
-        // Descarta rejeições antigas que foram superadas por uma aprovação/exclusão.
-        UserHistory latestNonRejection = historyRepo
-                .findLatestNonRejection(normalizedEmail)
-                .orElse(null);
-        LocalDateTime cutoff = latestNonRejection == null
-                ? null
-                : latestNonRejection.getRecordedAt();
-
-        List<UserHistory> rejections = historyRepo
-                .findByEmailAndStatusOrderByRecordedAtDesc(normalizedEmail, "REJECTED");
+        UserHistory latest = rejections.get(0);
 
         List<Map<String, Object>> items = new ArrayList<>();
         for (int i = rejections.size() - 1; i >= 0; i--) {
             UserHistory h = rejections.get(i);
-            if (cutoff != null && (h.getRecordedAt() == null || !h.getRecordedAt().isAfter(cutoff))) {
-                continue;
-            }
             Map<String, Object> item = new HashMap<>();
             item.put("rejectionReason", h.getRejectionReason());
             item.put("lastAdminMessage", h.getLastAdminMessage());
@@ -796,6 +786,11 @@ public class AdminController {
     // mais antiga), usada no chat para avisar o admin quando o mesmo usuário
     // (email/cpf) cadastra-se novamente após ter a conta excluída. Exibe todos
     // os motivos, e não apenas o da última exclusão.
+    //
+    // Exibe a exclusão sempre que houver alguma no histórico deste email,
+    // independentemente de ter havido uma rejeição depois. Assim o admin vê o
+    // motivo da rejeição (via previous-rejection) E o motivo da exclusão quando
+    // ambos aconteceram.
     @GetMapping("/previous-exclusion")
     public Map<String, Object> getPreviousExclusion(@RequestParam String email) {
 
@@ -806,21 +801,17 @@ public class AdminController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório");
         }
 
-        UserHistory latest = historyRepo
-                .findTopByEmailOrderByRecordedAtDesc(normalizedEmail)
-                .orElse(null);
+        // Todas as exclusões de conta do email (da mais recente para a mais antiga).
+        List<UserHistory> exclusions = historyRepo
+                .findExclusionsByEmail(normalizedEmail);
 
         Map<String, Object> m = new HashMap<>();
-
-        boolean latestIsExclusion = latest != null
-                && (latest.isDeleted() || "DELETED".equals(latest.getStatus()));
-        if (!latestIsExclusion) {
+        if (exclusions.isEmpty()) {
             m.put("found", false);
             return m;
         }
 
-        List<UserHistory> exclusions = historyRepo
-                .findExclusionsByEmail(normalizedEmail);
+        UserHistory latest = exclusions.get(0);
 
         m.put("found", true);
         m.put("email", latest.getEmail());

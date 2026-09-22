@@ -66,6 +66,9 @@ public interface UserHistoryRepository extends JpaRepository<UserHistory, Long> 
 
     List<UserHistory> findByTypeAndStatusAndHiddenOrderByRecordedAtDesc(UserType type, String status, boolean hidden);
 
+    // Banidos visíveis na tela (não "limpos" pelo admin).
+    List<UserHistory> findByTypeAndBannedAndHiddenOrderByRecordedAtDesc(UserType type, boolean banned, boolean hidden);
+
     // Todas as rejeições de um email (mesmo que já tenham sido "limpas" da tela).
     List<UserHistory> findByEmailAndStatusOrderByRecordedAtDesc(String email, String status);
 
