@@ -51,6 +51,11 @@ public class UserHistory {
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean banned = false;
 
+    // Motivo do banimento. É PRESERVADO mesmo após o desbanimento, para exibir
+    // no chat quando o mesmo email/cpf se cadastra novamente.
+    @Column(columnDefinition = "TEXT")
+    private String bannedReason;
+
     // Indica que uma tentativa aprovada foi posteriormente excluída pelo admin.
     // O status permanece "APPROVED", mas o histórico exibe "Aprovado" (cinza)
     // ao lado de "Excluído" (vermelho).
@@ -179,6 +184,14 @@ public class UserHistory {
 
     public void setBanned(boolean banned) {
         this.banned = banned;
+    }
+
+    public String getBannedReason() {
+        return bannedReason;
+    }
+
+    public void setBannedReason(String bannedReason) {
+        this.bannedReason = bannedReason;
     }
 
     public boolean isDeleted() {

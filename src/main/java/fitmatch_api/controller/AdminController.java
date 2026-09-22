@@ -788,9 +788,11 @@ public class AdminController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório");
         }
 
-        // Todas as rejeições do email (da mais recente para a mais antiga).
+        // Todas as rejeições "normais" do email (da mais recente para a mais
+        // antiga). Registros de banimento (bannedReason preenchido) são
+        // exibidos separadamente no endpoint "previous-ban".
         List<UserHistory> rejections = historyRepo
-                .findByEmailAndStatusOrderByRecordedAtDesc(normalizedEmail, "REJECTED");
+                .findRejectionsByEmail(normalizedEmail);
 
         Map<String, Object> m = new HashMap<>();
         if (rejections.isEmpty()) {
@@ -866,6 +868,47 @@ public class AdminController {
             items.add(item);
         }
         m.put("exclusions", items);
+        return m;
+    }
+
+    // Retorna TODOS os banimentos anteriores de um email (da mais recente para
+    // a mais antiga), usados no chat para avisar o admin quando o mesmo usuário
+    // (email/cpf) se cadastra novamente após ter sido banido e desbanido.
+    // O motivo é preservado (bannedReason) mesmo após o desbanimento.
+    @GetMapping("/previous-ban")
+    public Map<String, Object> getPreviousBan(@RequestParam String email) {
+
+        AuthContext.requireRole("ADMIN");
+
+        String normalizedEmail = email == null ? "" : email.trim().toLowerCase();
+        if (normalizedEmail.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório");
+        }
+
+        // Todos os banimentos do email (da mais recente para a mais antiga).
+        List<UserHistory> bans = historyRepo
+                .findBansByEmail(normalizedEmail);
+
+        Map<String, Object> m = new HashMap<>();
+        if (bans.isEmpty()) {
+            m.put("found", false);
+            return m;
+        }
+
+        UserHistory latest = bans.get(0);
+
+        m.put("found", true);
+        m.put("email", latest.getEmail());
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (int i = bans.size() - 1; i >= 0; i--) {
+            UserHistory h = bans.get(i);
+            Map<String, Object> item = new HashMap<>();
+            item.put("banReason", h.getBannedReason());
+            item.put("recordedAt", h.getRecordedAt() == null ? null : h.getRecordedAt().toString());
+            items.add(item);
+        }
+        m.put("bans", items);
         return m;
     }
 
@@ -963,6 +1006,7 @@ public class AdminController {
         h.setRejectionReason(user.getRejectionReason());
         h.setLastAdminMessage(lastAdminMessage);
         h.setBanned(banned);
+        h.setBannedReason(banned ? user.getRejectionReason() : null);
         h.setPhoto(userPhotoOrNull(user));
         h.setObjetivos(user.getObjetivos());
         h.setNivel(user.getNivel());
