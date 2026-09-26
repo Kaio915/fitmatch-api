@@ -1644,8 +1644,8 @@ public class RequestController {
                 + ". Decidi mudar meu plano e uma nova solicitação chegará para você em breve.";
         } else {
             text = "Olá, " + trainerName
-                    + ". Decidi não renovar e nem mudar o meu plano no momento. "
-                    + "Obrigado pelo suporte até aqui.";
+                    + ". Decidi não prosseguir com esta solicitação no momento. "
+                    + "Obrigado pelo suporte.";
         }
         msg.setText(appendRequestMarker(text, req));
         chatMessageRepo.save(msg);
@@ -1659,6 +1659,34 @@ public class RequestController {
                 .findByStudentIdAndTrainerIdAndStatusOrderByCreatedAtDesc(studentId, trainerId, "APPROVED")
                 .isEmpty();
         return hasPending || hasApproved;
+    }
+
+    @Transactional
+    public void terminateAfterTrainerReport(Long trainerId, Long studentId) {
+        List<StudentRequest> requests = requestRepo
+                .findByStudentIdAndTrainerIdOrderByCreatedAtDesc(studentId, trainerId);
+        List<StudentRequest> approved = requests.stream()
+                .filter(req -> "APPROVED".equals(req.getStatus()))
+                .toList();
+
+        if (!approved.isEmpty()) {
+            for (StudentRequest req : approved) {
+                sendStudentRemovedAfterBlockMessage(trainerId, studentId, req);
+            }
+            releaseApprovedStudentResources(trainerId, studentId, true);
+            return;
+        }
+
+        for (StudentRequest req : requests) {
+            if (!"PENDING".equals(req.getStatus())) {
+                continue;
+            }
+            sendPendingRejectedAfterBlockMessage(trainerId, studentId, req);
+            releaseRequestSlots(req);
+            req.setStatus("REJECTED");
+            req.setHiddenForTrainer(false);
+            requestRepo.save(req);
+        }
     }
 
     private void sendStudentRemovedAfterBlockMessage(Long trainerId, Long studentId, StudentRequest referenceReq) {

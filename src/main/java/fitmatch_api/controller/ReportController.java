@@ -23,10 +23,16 @@ public class ReportController {
 
     private final ReportRepository reportRepo;
     private final UserRepository userRepo;
+        private final RequestController requestController;
 
-    public ReportController(ReportRepository reportRepo, UserRepository userRepo) {
+        public ReportController(
+                        ReportRepository reportRepo,
+                        UserRepository userRepo,
+                        RequestController requestController
+        ) {
         this.reportRepo = reportRepo;
         this.userRepo = userRepo;
+                this.requestController = requestController;
     }
 
     @PostMapping
@@ -79,7 +85,11 @@ public class ReportController {
                 : body.details().trim());
         report.setSeen(false);
 
-        return reportRepo.save(report);
+                Report saved = reportRepo.save(report);
+                if (reporter.getType() == UserType.personal) {
+                        requestController.terminateAfterTrainerReport(reporterId, reportedUserId);
+                }
+                return saved;
     }
 
     public record ReportRequest(
