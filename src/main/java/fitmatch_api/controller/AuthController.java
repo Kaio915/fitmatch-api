@@ -153,6 +153,14 @@ public class AuthController {
         return jwtService.issueToken(user.getId(), Set.of(role));
     }
 
+    @GetMapping("/me")
+    public AuthResponse currentUser() {
+        JwtPrincipal principal = AuthContext.requirePrincipal();
+        User user = repo.findById(principal.userId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
+        return AuthResponse.from(user, null);
+    }
+
     // ================= REGISTER STUDENT (MULTIPART) =================
     @PostMapping(value = "/register/student", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public void registerStudent(
@@ -277,29 +285,37 @@ public class AuthController {
             @RequestPart(value = "photo", required = false) MultipartFile photo
     ) {
         User user = requireCadastroEditable(UserType.aluno);
+        boolean wasApproved = user.getStatus() == UserStatus.APPROVED;
         final String cpfNorm = normalizeCpf(cpf);
 
-        user.setName(safe(name));
-        final String emailNorm = safe(email);
-        if (!emailNorm.isEmpty()) {
-            ensureEmailAvailable(emailNorm, user.getId());
-            user.setEmail(emailNorm);
-        }
-        if (!safe(password).isEmpty()) {
-            user.setPassword(passwordEncoder.encode(safe(password)));
-        }
-        user.setCpf(cpfNorm);
         user.setObjetivos(safe(objetivos));
         user.setNivel(safe(nivel));
-        user.setCidade(safe(cidade));
+        if (wasApproved) {
+            user.setCidade(safe(cidade));
+        }
+        if (!wasApproved) {
+            user.setName(safe(name));
+            final String emailNorm = safe(email);
+            if (!emailNorm.isEmpty()) {
+                ensureEmailAvailable(emailNorm, user.getId());
+                user.setEmail(emailNorm);
+            }
+            if (!safe(password).isEmpty()) {
+                user.setPassword(passwordEncoder.encode(safe(password)));
+            }
+            user.setCpf(cpfNorm);
+            user.setCidade(safe(cidade));
 
-        byte[] photoBytes = readOptionalPhoto(photo);
-        if (photoBytes != null) {
-            user.setPhoto(photoBytes);
+            byte[] photoBytes = readOptionalPhoto(photo);
+            if (photoBytes != null) {
+                user.setPhoto(photoBytes);
+            }
         }
 
-        user.setStatus(UserStatus.PENDING);
-        user.setRejectionReason(null);
+        if (!wasApproved) {
+            user.setStatus(UserStatus.PENDING);
+            user.setRejectionReason(null);
+        }
 
         repo.save(user);
     }
@@ -320,6 +336,7 @@ public class AuthController {
             @RequestPart(value = "photo", required = false) MultipartFile photo
     ) {
         User user = requireCadastroEditable(UserType.personal);
+        boolean wasApproved = user.getStatus() == UserStatus.APPROVED;
         final String cpfNorm = normalizeCpf(cpf);
         final CrefValidationService.CrefValidationResult crefValidation =
                 crefValidationService.validate(cref, null);
@@ -351,8 +368,10 @@ public class AuthController {
             user.setPhoto(photoBytes);
         }
 
-        user.setStatus(UserStatus.PENDING);
-        user.setRejectionReason(null);
+        if (!wasApproved) {
+            user.setStatus(UserStatus.PENDING);
+            user.setRejectionReason(null);
+        }
 
         repo.save(user);
     }
@@ -409,10 +428,9 @@ public class AuthController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tipo de cadastro inválido para este usuário");
         }
 
-        if (user.getStatus() == UserStatus.APPROVED
-                || user.getStatus() == UserStatus.REJECTED) {
+        if (user.getStatus() == UserStatus.REJECTED) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Não é possível editar o cadastro: ele já foi aprovado ou rejeitado");
+                "Não é possível editar o cadastro: ele foi rejeitado");
         }
 
         return user;
@@ -535,7 +553,7 @@ public class AuthController {
     }
 
     // ================= UPDATE TRAINER PROFILE =================
-    public record UpdateTrainerProfileDto(String cidade, String valorHora, String horasPorSessao) {}
+    public record UpdateTrainerProfileDto(String cidade, String valorHora, String especialidade, String bio) {}
 
     @PatchMapping("/trainer/{id}/profile")
     public void updateTrainerProfile(@PathVariable Long id, @RequestBody UpdateTrainerProfileDto dto) {
@@ -547,7 +565,8 @@ public class AuthController {
         }
         if (dto.cidade() != null) user.setCidade(dto.cidade().trim());
         if (dto.valorHora() != null) user.setValorHora(dto.valorHora().trim());
-        if (dto.horasPorSessao() != null) user.setHorasPorSessao(dto.horasPorSessao().trim());
+        if (dto.especialidade() != null) user.setEspecialidade(dto.especialidade().trim());
+        if (dto.bio() != null) user.setBio(dto.bio().trim());
         repo.save(user);
     }
 

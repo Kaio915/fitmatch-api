@@ -289,7 +289,8 @@ public class ConnectionController {
         if (req == null || req.getPlanType() == null) {
             return false;
         }
-        return "SEMANAL".equalsIgnoreCase(req.getPlanType().trim());
+        String planType = req.getPlanType().trim();
+        return "SEMANAL".equalsIgnoreCase(planType) || "MENSAL".equalsIgnoreCase(planType);
     }
 
     private String buildStoredOnceDay(String dayName, String dateIso) {
@@ -597,34 +598,42 @@ public class ConnectionController {
 
         List<StudentTrainerConnection> trainerConnections = repo.findByTrainerId(trainerId);
 
-        return trainerConnections
-                .stream()
-                .filter(conn -> !blockedStudentIds.contains(conn.getStudentId()))
-                .flatMap(conn -> requestRepo
-                        .findByStudentIdAndTrainerIdAndStatusOrderByCreatedAtDesc(
-                                conn.getStudentId(),
-                                trainerId,
-                                "APPROVED"
-                        )
-                        .stream()
-                        .map(approved -> {
-                            Map<String, Object> payload = new HashMap<>();
-                            payload.put("id", approved.getId());
-                            payload.put("studentId", conn.getStudentId());
-                            payload.put("trainerId", trainerId);
-                            payload.put("studentName", conn.getStudentName() != null ? conn.getStudentName() : approved.getStudentName());
-                            payload.put("trainerName", conn.getTrainerName() != null ? conn.getTrainerName() : approved.getTrainerName());
-                            payload.put("requestId", approved.getId());
-                            payload.put("planType", approved.getPlanType());
-                            payload.put("dayName", approved.getDayName());
-                            payload.put("time", approved.getTime());
-                            payload.put("daysJson", approved.getDaysJson());
-                            payload.put("status", approved.getStatus());
-                            payload.put("createdAt", approved.getCreatedAt());
-                                payload.put("approvedAt", approved.getApprovedAt());
-                            return payload;
-                        }))
-                .collect(Collectors.toList());
+        Map<Long, StudentTrainerConnection> connectionsByStudent = new HashMap<>();
+        for (StudentTrainerConnection conn : trainerConnections) {
+            if (conn.getStudentId() != null) {
+                connectionsByStudent.put(conn.getStudentId(), conn);
+            }
+        }
+
+        // Baseia-se nas solicitações APROVADAS (fonte da verdade de "Meus Alunos"),
+        // garantindo que o aluno aprovado apareça mesmo que a conexão ainda não
+        // tenha sido materializada pelo fluxo de aprovação.
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (StudentRequest approved : requestRepo.findByTrainerIdAndStatusOrderByCreatedAtDesc(trainerId, "APPROVED")) {
+            Long studentId = approved.getStudentId();
+            if (studentId == null || blockedStudentIds.contains(studentId)) {
+                continue;
+            }
+
+            StudentTrainerConnection conn = connectionsByStudent.get(studentId);
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("id", approved.getId());
+            payload.put("studentId", studentId);
+            payload.put("trainerId", trainerId);
+            payload.put("studentName", conn != null && conn.getStudentName() != null ? conn.getStudentName() : approved.getStudentName());
+            payload.put("trainerName", conn != null && conn.getTrainerName() != null ? conn.getTrainerName() : approved.getTrainerName());
+            payload.put("requestId", approved.getId());
+            payload.put("planType", approved.getPlanType());
+            payload.put("dayName", approved.getDayName());
+            payload.put("time", approved.getTime());
+            payload.put("daysJson", approved.getDaysJson());
+            payload.put("excludedDatesJson", approved.getExcludedDatesJson());
+            payload.put("status", approved.getStatus());
+            payload.put("createdAt", approved.getCreatedAt());
+            payload.put("approvedAt", approved.getApprovedAt());
+            result.add(payload);
+        }
+        return result;
         }
 
     // Retorna todos os trainers que um aluno segue
@@ -639,7 +648,11 @@ public class ConnectionController {
 
         List<StudentTrainerConnection> connections = repo.findByStudentId(studentId);
         List<StudentTrainerConnection> visibleConnections = connections.stream()
-                .filter(conn -> !blockedTrainerIds.contains(conn.getTrainerId()))
+            .filter(conn -> !blockedTrainerIds.contains(conn.getTrainerId()))
+            .filter(conn -> userRepo.findById(conn.getTrainerId())
+                .map(trainer -> trainer.getType() == fitmatch_api.model.UserType.personal
+                    && trainer.getStatus() == fitmatch_api.model.UserStatus.APPROVED)
+                .orElse(false))
                 .collect(Collectors.toList());
 
         for (StudentTrainerConnection conn : visibleConnections) {

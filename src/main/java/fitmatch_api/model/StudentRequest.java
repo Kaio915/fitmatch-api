@@ -46,6 +46,12 @@ public class StudentRequest {
     @Column(columnDefinition = "TEXT")
     private String daysJson; // JSON array [{"dayName":"...","time":"..."}] para planos recorrentes
 
+    // Datas (ISO "yyyy-MM-dd") em que um plano recorrente (MENSAL/SEMANAL) é
+    // sobrescrito por uma solicitação DIARIO de outro aluno no mesmo dia da
+    // semana + horário. Ex.: ["2026-09-25"].
+    @Column(columnDefinition = "TEXT")
+    private String excludedDatesJson;
+
     @Column
     private Boolean hiddenForTrainer = false;
 
@@ -104,6 +110,10 @@ public class StudentRequest {
 
     public String getDaysJson() { return daysJson; }
     public void setDaysJson(String daysJson) { this.daysJson = daysJson; }
+
+    public String getExcludedDatesJson() { return excludedDatesJson; }
+    public void setExcludedDatesJson(String excludedDatesJson) { this.excludedDatesJson = excludedDatesJson; }
+
 
     public Boolean getHiddenForTrainer() { return hiddenForTrainer; }
     public void setHiddenForTrainer(Boolean hiddenForTrainer) {

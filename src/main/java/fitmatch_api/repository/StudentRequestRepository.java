@@ -15,10 +15,20 @@ public interface StudentRequestRepository extends JpaRepository<StudentRequest, 
 
     List<StudentRequest> findByTrainerIdAndStatus(Long trainerId, String status);
 
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
+    @org.springframework.transaction.annotation.Transactional
+    @Query("delete from StudentRequest r where r.trainerId = :trainerId")
+    int deleteByTrainerId(@Param("trainerId") Long trainerId);
+
     @Query("SELECT r FROM StudentRequest r WHERE r.trainerId = :trainerId AND (COALESCE(r.hiddenForTrainer, false) = false OR r.status = 'APPROVED') ORDER BY r.createdAt DESC")
     List<StudentRequest> findByTrainerIdOrderByCreatedAtDesc(@Param("trainerId") Long trainerId);
 
     List<StudentRequest> findByStudentIdOrderByCreatedAtDesc(Long studentId);
+
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
+    @org.springframework.transaction.annotation.Transactional
+    @Query("UPDATE StudentRequest r SET r.status = 'REJECTED', r.updatedAt = :now WHERE r.id = :id AND r.status = 'PENDING'")
+    int markExpired(@Param("id") Long id, @Param("now") java.time.LocalDateTime now);
 
     // Verifica se aluno já tem solicitação aberta com um personal
     Optional<StudentRequest> findByStudentIdAndTrainerIdAndStatus(Long studentId, Long trainerId, String status);

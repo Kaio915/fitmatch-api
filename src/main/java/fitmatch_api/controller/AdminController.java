@@ -8,6 +8,9 @@ import fitmatch_api.model.UserStatus;
 import fitmatch_api.model.UserType;
 import fitmatch_api.repository.ChatMessageRepository;
 import fitmatch_api.repository.ReportRepository;
+import fitmatch_api.repository.StudentRequestRepository;
+import fitmatch_api.repository.StudentTrainerConnectionRepository;
+import fitmatch_api.repository.TrainerSlotRepository;
 import fitmatch_api.repository.UserHistoryRepository;
 import fitmatch_api.repository.UserRepository;
 import fitmatch_api.security.AuthContext;
@@ -37,14 +40,20 @@ public class AdminController {
     private final ChatMessageRepository chatMessageRepo;
     private final UserHistoryRepository historyRepo;
     private final ReportRepository reportRepo;
+        private final StudentRequestRepository requestRepo;
+        private final StudentTrainerConnectionRepository connectionRepo;
+        private final TrainerSlotRepository slotRepo;
     private final EmailService emailService;
     private final Environment environment;
 
-    public AdminController(UserRepository repo, ChatMessageRepository chatMessageRepo, UserHistoryRepository historyRepo, ReportRepository reportRepo, EmailService emailService, Environment environment) {
+        public AdminController(UserRepository repo, ChatMessageRepository chatMessageRepo, UserHistoryRepository historyRepo, ReportRepository reportRepo, StudentRequestRepository requestRepo, StudentTrainerConnectionRepository connectionRepo, TrainerSlotRepository slotRepo, EmailService emailService, Environment environment) {
         this.repo = repo;
         this.chatMessageRepo = chatMessageRepo;
         this.historyRepo = historyRepo;
         this.reportRepo = reportRepo;
+        this.requestRepo = requestRepo;
+        this.connectionRepo = connectionRepo;
+        this.slotRepo = slotRepo;
         this.emailService = emailService;
         this.environment = environment;
     }
@@ -537,6 +546,12 @@ public class AdminController {
                 user.setStatus(UserStatus.REJECTED);
                 user.setRejectionReason(ADMIN_DELETED_REASON);
                 repo.save(user);
+
+                if (user.getType() == UserType.personal) {
+                        connectionRepo.deleteByTrainerId(id);
+                        requestRepo.deleteByTrainerId(id);
+                        slotRepo.deleteByTrainerId(id);
+                }
 
                 // Marca o histórico aprovado como "excluído" (deleted = true) e
                 // guarda o motivo específico da exclusão, para exibir no próximo

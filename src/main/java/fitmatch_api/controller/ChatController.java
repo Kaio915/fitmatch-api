@@ -34,7 +34,7 @@ public class ChatController {
 
     private static final Pattern REQUEST_MARKER_PATTERN = Pattern.compile("\\[\\[REQ:(\\d+)\\]\\]");
     private static final Pattern SLOT_PATTERN = Pattern.compile(
-            "(segunda|terca|terça|quarta|quinta|sexta|sabado|sábado|domingo)\\s*(as|às)\\s*(\\d{1,2}:\\d{2})",
+            "(segunda|terca|terça|quarta|quinta|sexta|sabado|sábado|domingo)(?:\\s+\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?)?\\s*(as|às)\\s*(\\d{1,2}:\\d{2})",
             Pattern.CASE_INSENSITIVE
     );
         private static final Pattern JSON_OBJECT_PATTERN = Pattern.compile("\\{[^{}]*}");

@@ -13,6 +13,7 @@ import fitmatch_api.model.TrainerSlot;
 import fitmatch_api.model.User;
 import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.BlockedStudentService;
+import fitmatch_api.service.EmailService;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +25,7 @@ import java.time.DayOfWeek;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -45,6 +47,7 @@ public class RequestController {
     private final StudentTrainerConnectionRepository connectionRepo;
     private final ChatMessageRepository chatMessageRepo;
     private final BlockedStudentService blockedStudentService;
+    private final EmailService emailService;
     private final UserRepository userRepo;
         private static final Pattern DAY_TIME_PATTERN_DOUBLE = Pattern.compile(
             "\\\"dayName\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"\\s*,\\s*\\\"time\\\"\\s*:\\s*\\\"([^\\\"]+)\\\""
@@ -70,7 +73,8 @@ public class RequestController {
             StudentTrainerConnectionRepository connectionRepo,
             ChatMessageRepository chatMessageRepo,
             BlockedStudentService blockedStudentService,
-            UserRepository userRepo
+            UserRepository userRepo,
+            EmailService emailService
     ) {
         this.requestRepo = requestRepo;
         this.slotRepo = slotRepo;
@@ -79,6 +83,7 @@ public class RequestController {
         this.chatMessageRepo = chatMessageRepo;
         this.blockedStudentService = blockedStudentService;
         this.userRepo = userRepo;
+        this.emailService = emailService;
     }
 
     private List<Map<String, String>> parseSlotsFromJson(String rawJson) {
@@ -256,6 +261,13 @@ public class RequestController {
         }
 
         List<TrainerSlot> blockedSlots = slotRepo.findByTrainerId(trainerId);
+        boolean hasApprovedMonthlyBlock = isCoveredByApprovedMonthlyRequest(
+                trainerId,
+                selectedSlot,
+                selectedDay,
+                selectedTime,
+                selectedDateIso
+        );
         boolean hasWeeklyBlock = false;
         boolean hasOnceBlock = false;
         boolean hasOnceUnblock = false;
@@ -301,10 +313,76 @@ public class RequestController {
         if (hasOnceBlock) {
             return true;
         }
+        if (hasApprovedMonthlyBlock && !hasOnceUnblock) {
+            return true;
+        }
         if (hasWeeklyBlock && hasOnceUnblock) {
             return false;
         }
         return hasWeeklyBlock;
+    }
+
+    private boolean isCoveredByApprovedMonthlyRequest(
+            Long trainerId,
+            Map<String, String> selectedSlot,
+            String selectedDay,
+            String selectedTime,
+            String selectedDateIso
+    ) {
+        if (selectedDateIso.isBlank()) {
+            return false;
+        }
+
+        LocalDate selectedDate;
+        int[] selectedHm = parseHourMinute(selectedSlot.getOrDefault("time", ""));
+        if (selectedHm == null) {
+            return false;
+        }
+        try {
+            selectedDate = LocalDate.parse(selectedDateIso);
+        } catch (DateTimeParseException ignored) {
+            return false;
+        }
+
+        LocalDateTime selectedStart = LocalDateTime.of(
+                selectedDate,
+                LocalTime.of(selectedHm[0], selectedHm[1])
+        );
+
+        for (StudentRequest req : requestRepo.findByTrainerIdAndStatus(trainerId, "APPROVED")) {
+            if (!"MENSAL".equals(normalizePlanType(req.getPlanType()))) {
+                continue;
+            }
+
+            LocalDateTime anchor = req.getCreatedAt() != null
+                    ? req.getCreatedAt()
+                    : selectedStart;
+            LocalDateTime firstSession = resolveFirstSessionStartAt(req);
+            if (firstSession == null) {
+                continue;
+            }
+
+            for (Map<String, String> slot : extractSelectedSlots(req)) {
+                String requestDay = normalizeDayName(slot.getOrDefault("dayName", ""));
+                String requestTime = normalizeTime(slot.getOrDefault("time", ""));
+                if (!selectedDay.equals(requestDay) || !selectedTime.equals(requestTime)) {
+                    continue;
+                }
+
+                LocalDateTime slotStart = resolveSlotStartAt(slot, anchor);
+                if (slotStart == null || selectedStart.isBefore(slotStart)) {
+                    continue;
+                }
+
+                long daysFromFirstSession = ChronoUnit.DAYS.between(slotStart.toLocalDate(), selectedDate);
+                if (daysFromFirstSession >= 0
+                        && daysFromFirstSession % 7 == 0
+                        && !selectedStart.isAfter(slotStart.plusMonths(1))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private DayOfWeek weekdayFromPt(String dayName) {
@@ -684,12 +762,7 @@ public class RequestController {
                     );
                 }
 
-                if (!selectedWeekdays.add(dayName)) {
-                    throw new ResponseStatusException(
-                            HttpStatus.BAD_REQUEST,
-                            "No plano mensal, não é permitido repetir o mesmo dia da semana"
-                    );
-                }
+                selectedWeekdays.add(dayName);
 
                 if (selectedWeekdays.size() > 7) {
                     throw new ResponseStatusException(
@@ -879,20 +952,26 @@ public class RequestController {
         }
 
         LocalDateTime now = LocalDateTime.now();
-        List<StudentRequest> changed = new ArrayList<>();
+        int expiredCount = 0;
         for (StudentRequest req : requests) {
-            if (isPendingExpired(req, now)) {
+            if (!isPendingExpired(req, now)) {
+                continue;
+            }
+
+            // Marca atomicamente como REJECTED apenas se ainda estiver PENDING,
+            // evitando que chamadas concorrentes enviem o aviso de expiração em
+            // duplicidade (dashboard do aluno e do personal ao mesmo tempo).
+            boolean won = req.getId() == null
+                    || requestRepo.markExpired(req.getId(), now) > 0;
+            req.setStatus("REJECTED");
+            expiredCount++;
+
+            if (won) {
                 sendPendingExpiredByTimeoutMessage(req);
-                req.setStatus("REJECTED");
-                changed.add(req);
             }
         }
 
-        if (!changed.isEmpty()) {
-            requestRepo.saveAll(changed);
-        }
-
-        return changed.size();
+        return expiredCount;
     }
 
     private void sendPendingExpiredByTimeoutMessage(StudentRequest req) {
@@ -966,7 +1045,8 @@ public class RequestController {
         if (req == null || req.getPlanType() == null) {
             return false;
         }
-        return "SEMANAL".equalsIgnoreCase(req.getPlanType().trim());
+        String planType = req.getPlanType().trim();
+        return "SEMANAL".equalsIgnoreCase(planType) || "MENSAL".equalsIgnoreCase(planType);
     }
 
     private String buildStoredOnceDay(String dayName, String dateIso) {
@@ -1013,6 +1093,10 @@ public class RequestController {
         List<StudentRequest> activeRequests = requestRepo.findByStudentIdOrderByCreatedAtDesc(studentId)
                 .stream()
                 .filter(req -> "PENDING".equals(req.getStatus()) || "APPROVED".equals(req.getStatus()))
+            .filter(req -> userRepo.findById(req.getTrainerId())
+                .map(trainer -> trainer.getType() == fitmatch_api.model.UserType.personal
+                    && trainer.getStatus() == fitmatch_api.model.UserStatus.APPROVED)
+                .orElse(false))
                 .collect(Collectors.toList());
 
         Set<String> activeSlotKeys = new HashSet<>();
@@ -1111,7 +1195,16 @@ public class RequestController {
         req.setStatus("PENDING");
         req.setPlanType(normalizedPlanType);
         req.setDaysJson(serializeSlotsJson(slotsForPersistence));
-        return requestRepo.save(req);
+        StudentRequest saved = requestRepo.save(req);
+
+        User trainer = userRepo.findById(dto.trainerId()).orElse(null);
+        emailService.sendScheduleRequestEmail(
+            trainer,
+            req.getStudentName(),
+            normalizedPlanType,
+            slotsForPersistence
+        );
+        return saved;
     }
 
     private boolean slotIsUsedByAnotherApprovedRequest(StudentRequest currentRequest, Map<String, String> currentSlot) {
@@ -1136,6 +1229,173 @@ public class RequestController {
                             return currentStoredDay.equals(otherStoredDay)
                                     && currentTime.equals(otherTime);
                         }));
+    }
+
+    private List<String> parseExcludedDates(StudentRequest req) {
+        if (req == null || req.getExcludedDatesJson() == null || req.getExcludedDatesJson().isBlank()) {
+            return new ArrayList<>();
+        }
+        List<String> dates = new ArrayList<>();
+        Matcher m = Pattern.compile("\"([^\"]*)\"").matcher(req.getExcludedDatesJson());
+        while (m.find()) {
+            String dateIso = normalizeDateIso(m.group(1));
+            if (!dateIso.isBlank() && !dates.contains(dateIso)) {
+                dates.add(dateIso);
+            }
+        }
+        return dates;
+    }
+
+    private String serializeExcludedDates(List<String> dates) {
+        if (dates == null || dates.isEmpty()) {
+            return null;
+        }
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < dates.size(); i++) {
+            if (i > 0) {
+                json.append(',');
+            }
+            json.append('"').append(jsonEscape(dates.get(i))).append('"');
+        }
+        json.append(']');
+        return json.toString();
+    }
+
+    private void addExcludedDate(StudentRequest recurringReq, String dateIso) {
+        if (recurringReq == null) {
+            return;
+        }
+        List<String> dates = parseExcludedDates(recurringReq);
+        String normalized = normalizeDateIso(dateIso);
+        if (normalized.isBlank() || dates.contains(normalized)) {
+            return;
+        }
+        dates.add(normalized);
+        recurringReq.setExcludedDatesJson(serializeExcludedDates(dates));
+    }
+
+    private void removeExcludedDate(StudentRequest recurringReq, String dateIso) {
+        if (recurringReq == null) {
+            return;
+        }
+        List<String> dates = parseExcludedDates(recurringReq);
+        String normalized = normalizeDateIso(dateIso);
+        if (dates.remove(normalized)) {
+            recurringReq.setExcludedDatesJson(serializeExcludedDates(dates));
+        }
+    }
+
+    private List<StudentRequest> findOverlappingApprovedRecurringRequests(
+            Long trainerId,
+            Long studentId,
+            String dayName,
+            String time
+    ) {
+        String targetDay = normalizeDayName(dayName);
+        String targetTime = normalizeTime(time);
+        if (targetDay.isBlank() || targetTime.isBlank()) {
+            return new ArrayList<>();
+        }
+        return requestRepo.findByTrainerIdAndStatus(trainerId, "APPROVED")
+                .stream()
+                .filter(req -> req.getStudentId() != null && !req.getStudentId().equals(studentId))
+                .filter(this::shouldPersistRequestSlot)
+                .filter(req -> extractSelectedSlots(req).stream().anyMatch(slot ->
+                        targetDay.equals(normalizeDayName(slot.getOrDefault("dayName", "")))
+                                && targetTime.equals(normalizeTime(slot.getOrDefault("time", "")))))
+                .collect(Collectors.toList());
+    }
+
+    private List<StudentRequest> findOverlappingApprovedDailyRequests(
+            Long trainerId,
+            Long studentId,
+            String dayName,
+            String time
+    ) {
+        String targetDay = normalizeDayName(dayName);
+        String targetTime = normalizeTime(time);
+        if (targetDay.isBlank() || targetTime.isBlank()) {
+            return new ArrayList<>();
+        }
+        return requestRepo.findByTrainerIdAndStatus(trainerId, "APPROVED")
+                .stream()
+                .filter(req -> req.getStudentId() != null && !req.getStudentId().equals(studentId))
+                .filter(req -> "DIARIO".equals(normalizePlanType(req.getPlanType())))
+                .filter(req -> extractSelectedSlots(req).stream().anyMatch(slot ->
+                        targetDay.equals(normalizeDayName(slot.getOrDefault("dayName", "")))
+                                && targetTime.equals(normalizeTime(slot.getOrDefault("time", "")))))
+                .collect(Collectors.toList());
+    }
+
+    // Ao aprovar um pedido, garante que um DIARIO (data específica) sobrescreva
+    // um MENSAL/SEMANAL recorrente no mesmo dia da semana + horário, e vice-versa,
+    // registrando a data sobrescrita no excludedDatesJson do plano recorrente.
+    private void syncDailyOverridesOnApproval(StudentRequest req, String planType) {
+        if (req == null) {
+            return;
+        }
+        List<Map<String, String>> slots = extractSelectedSlots(req);
+
+        if ("DIARIO".equals(planType)) {
+            for (Map<String, String> slot : slots) {
+                String dayName = slot.getOrDefault("dayName", "").trim();
+                String time = slot.getOrDefault("time", "").trim();
+                String dateIso = normalizeDateIso(slot.getOrDefault("dateIso", ""));
+                if (dayName.isEmpty() || time.isEmpty() || dateIso.isBlank()) {
+                    continue;
+                }
+                for (StudentRequest recurring : findOverlappingApprovedRecurringRequests(
+                        req.getTrainerId(), req.getStudentId(), dayName, time)) {
+                    addExcludedDate(recurring, dateIso);
+                    requestRepo.save(recurring);
+                }
+            }
+            return;
+        }
+
+        if (shouldPersistRequestSlot(req)) {
+            for (Map<String, String> slot : slots) {
+                String dayName = slot.getOrDefault("dayName", "").trim();
+                String time = slot.getOrDefault("time", "").trim();
+                if (dayName.isEmpty() || time.isEmpty()) {
+                    continue;
+                }
+                for (StudentRequest daily : findOverlappingApprovedDailyRequests(
+                        req.getTrainerId(), req.getStudentId(), dayName, time)) {
+                    for (Map<String, String> dailySlot : extractSelectedSlots(daily)) {
+                        String dailyDate = normalizeDateIso(dailySlot.getOrDefault("dateIso", ""));
+                        if (!dailyDate.isBlank()
+                                && normalizeDayName(dailySlot.getOrDefault("dayName", ""))
+                                        .equals(normalizeDayName(dayName))
+                                && normalizeTime(dailySlot.getOrDefault("time", ""))
+                                        .equals(normalizeTime(time))) {
+                            addExcludedDate(req, dailyDate);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Ao liberar/cancelar/rejeitar um DIARIO, restaura os horários dos planos
+    // recorrentes que haviam sido sobrescritos naquelas datas específicas.
+    private void removeDailyOverridesFromRecurringRequests(StudentRequest dailyReq) {
+        if (dailyReq == null || !"DIARIO".equals(normalizePlanType(dailyReq.getPlanType()))) {
+            return;
+        }
+        for (Map<String, String> slot : extractSelectedSlots(dailyReq)) {
+            String dayName = slot.getOrDefault("dayName", "").trim();
+            String time = slot.getOrDefault("time", "").trim();
+            String dateIso = normalizeDateIso(slot.getOrDefault("dateIso", ""));
+            if (dayName.isEmpty() || time.isEmpty() || dateIso.isBlank()) {
+                continue;
+            }
+            for (StudentRequest recurring : findOverlappingApprovedRecurringRequests(
+                    dailyReq.getTrainerId(), dailyReq.getStudentId(), dayName, time)) {
+                removeExcludedDate(recurring, dateIso);
+                requestRepo.save(recurring);
+            }
+        }
     }
 
     private void releaseRequestSlots(StudentRequest req) {
@@ -1165,6 +1425,8 @@ public class RequestController {
                 clearLegacyRecurringManualSlot(req, slot);
             }
         }
+
+        removeDailyOverridesFromRecurringRequests(req);
     }
 
     private void clearLegacyRecurringManualSlot(StudentRequest req, Map<String, String> slot) {
@@ -1624,6 +1886,7 @@ public class RequestController {
                     });
 
             req.setApprovedAt(LocalDateTime.now());
+            syncDailyOverridesOnApproval(req, planType);
         } else {
             releaseRequestSlots(req);
         }

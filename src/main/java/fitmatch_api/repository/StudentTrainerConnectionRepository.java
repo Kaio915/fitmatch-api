@@ -19,4 +19,9 @@ public interface StudentTrainerConnectionRepository extends JpaRepository<Studen
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from StudentTrainerConnection c where c.studentId = :studentId and c.trainerId = :trainerId")
     int deleteByStudentIdAndTrainerId(@Param("studentId") Long studentId, @Param("trainerId") Long trainerId);
+
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from StudentTrainerConnection c where c.trainerId = :trainerId")
+    int deleteByTrainerId(@Param("trainerId") Long trainerId);
 }
