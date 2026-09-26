@@ -185,7 +185,10 @@ public class EmailService {
             LocalDateTime firstAt = resolveSlotDateTime(firstSlot, LocalDateTime.now());
             LocalDateTime windowEnd = firstAt == null
                 ? null
-                : LocalDateTime.of(firstAt.toLocalDate().plusMonths(1), LocalTime.MAX);
+                : LocalDateTime.of(
+                    firstAt.toLocalDate().plusMonths(1).minusDays(1),
+                    LocalTime.MAX
+                );
             Map<String, String> lastSlot = firstSlot;
             LocalDateTime lastAt = firstAt;
 

@@ -377,7 +377,9 @@ public class RequestController {
                 long daysFromFirstSession = ChronoUnit.DAYS.between(slotStart.toLocalDate(), selectedDate);
                 if (daysFromFirstSession >= 0
                         && daysFromFirstSession % 7 == 0
-                        && !selectedStart.isAfter(slotStart.plusMonths(1))) {
+                    && !selectedStart.isAfter(
+                        slotStart.plusMonths(1).minusDays(1)
+                    )) {
                     return true;
                 }
             }
@@ -716,7 +718,10 @@ public class RequestController {
             return LocalDateTime.of(anchor.toLocalDate().plusDays(7), LocalTime.MAX);
         }
         if ("MENSAL".equals(planType)) {
-            return LocalDateTime.of(anchor.toLocalDate().plusMonths(1), LocalTime.MAX);
+            return LocalDateTime.of(
+                    anchor.toLocalDate().plusMonths(1).minusDays(1),
+                    LocalTime.MAX
+            );
         }
         return LocalDateTime.of(anchor.toLocalDate().plusDays(1), LocalTime.MAX);
     }
