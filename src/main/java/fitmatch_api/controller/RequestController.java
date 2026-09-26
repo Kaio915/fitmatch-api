@@ -2157,17 +2157,20 @@ public class RequestController {
     }
 
     // Personal remove solicitação apenas da sua própria lista
+    @Transactional
     @PatchMapping("/{id}/hide-for-trainer")
     public StudentRequest hideRequestForTrainer(@PathVariable Long id) {
         return hideRequestForTrainerInternal(id);
     }
 
     // Compatibilidade para clientes/rede que não aceitam PATCH
+    @Transactional
     @PostMapping("/{id}/hide-for-trainer")
     public StudentRequest hideRequestForTrainerPost(@PathVariable Long id) {
         return hideRequestForTrainerInternal(id);
     }
 
+    @Transactional
     @DeleteMapping("/{id}/hide-for-trainer")
     public StudentRequest hideRequestForTrainerDelete(@PathVariable Long id) {
         return hideRequestForTrainerInternal(id);
@@ -2181,6 +2184,17 @@ public class RequestController {
 
         // Solicitações aprovadas: apenas ocultar da lista do personal,
         // sem liberar slots nem remover conexão com o aluno.
+        if ("APPROVED".equals(req.getStatus())) {
+            connectionRepo.findByStudentIdAndTrainerId(req.getStudentId(), req.getTrainerId())
+                    .orElseGet(() -> {
+                        StudentTrainerConnection connection = new StudentTrainerConnection();
+                        connection.setStudentId(req.getStudentId());
+                        connection.setTrainerId(req.getTrainerId());
+                        connection.setStudentName(req.getStudentName());
+                        connection.setTrainerName(req.getTrainerName());
+                        return connectionRepo.save(connection);
+                    });
+        }
         if ("PENDING".equals(req.getStatus())) {
             releaseRequestSlots(req);
             req.setStatus("REJECTED");
