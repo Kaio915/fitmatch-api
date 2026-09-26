@@ -1290,6 +1290,22 @@ public class RequestController {
         }
     }
 
+    // Resolve a data específica (ISO "yyyy-MM-dd") de um slot, considerando
+    // tanto "dateIso" quanto "dateLabel" (dd/MM/yyyy ou dd/MM). Isso garante
+    // que a sobrescrita de um plano DIARIO sobre um plano recorrente funcione
+    // mesmo quando o app envia a data apenas como rótulo.
+    private String resolveSlotDateIso(Map<String, String> slot, LocalDateTime anchor) {
+        if (slot == null) {
+            return "";
+        }
+        String dateIso = normalizeDateIso(slot.getOrDefault("dateIso", ""));
+        if (!dateIso.isBlank()) {
+            return dateIso;
+        }
+        LocalDateTime resolved = resolveSlotStartAtFromMetadata(slot, anchor);
+        return resolved == null ? "" : resolved.toLocalDate().toString();
+    }
+
     private List<StudentRequest> findOverlappingApprovedRecurringRequests(
             Long trainerId,
             Long studentId,
@@ -1340,12 +1356,13 @@ public class RequestController {
             return;
         }
         List<Map<String, String>> slots = extractSelectedSlots(req);
+        LocalDateTime anchor = req.getCreatedAt() != null ? req.getCreatedAt() : LocalDateTime.now();
 
         if ("DIARIO".equals(planType)) {
             for (Map<String, String> slot : slots) {
                 String dayName = slot.getOrDefault("dayName", "").trim();
                 String time = slot.getOrDefault("time", "").trim();
-                String dateIso = normalizeDateIso(slot.getOrDefault("dateIso", ""));
+                String dateIso = resolveSlotDateIso(slot, anchor);
                 if (dayName.isEmpty() || time.isEmpty() || dateIso.isBlank()) {
                     continue;
                 }
@@ -1367,8 +1384,11 @@ public class RequestController {
                 }
                 for (StudentRequest daily : findOverlappingApprovedDailyRequests(
                         req.getTrainerId(), req.getStudentId(), dayName, time)) {
+                    LocalDateTime dailyAnchor = daily.getCreatedAt() != null
+                            ? daily.getCreatedAt()
+                            : LocalDateTime.now();
                     for (Map<String, String> dailySlot : extractSelectedSlots(daily)) {
-                        String dailyDate = normalizeDateIso(dailySlot.getOrDefault("dateIso", ""));
+                        String dailyDate = resolveSlotDateIso(dailySlot, dailyAnchor);
                         if (!dailyDate.isBlank()
                                 && normalizeDayName(dailySlot.getOrDefault("dayName", ""))
                                         .equals(normalizeDayName(dayName))
@@ -1388,10 +1408,13 @@ public class RequestController {
         if (dailyReq == null || !"DIARIO".equals(normalizePlanType(dailyReq.getPlanType()))) {
             return;
         }
+        LocalDateTime anchor = dailyReq.getCreatedAt() != null
+                ? dailyReq.getCreatedAt()
+                : LocalDateTime.now();
         for (Map<String, String> slot : extractSelectedSlots(dailyReq)) {
             String dayName = slot.getOrDefault("dayName", "").trim();
             String time = slot.getOrDefault("time", "").trim();
-            String dateIso = normalizeDateIso(slot.getOrDefault("dateIso", ""));
+            String dateIso = resolveSlotDateIso(slot, anchor);
             if (dayName.isEmpty() || time.isEmpty() || dateIso.isBlank()) {
                 continue;
             }
