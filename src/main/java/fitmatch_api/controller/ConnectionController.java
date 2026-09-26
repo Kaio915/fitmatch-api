@@ -609,7 +609,7 @@ public class ConnectionController {
         // garantindo que o aluno aprovado apareça mesmo que a conexão ainda não
         // tenha sido materializada pelo fluxo de aprovação.
         List<Map<String, Object>> result = new ArrayList<>();
-        for (StudentRequest approved : requestRepo.findByTrainerIdAndStatusOrderByCreatedAtDesc(trainerId, "APPROVED")) {
+        for (StudentRequest approved : requestRepo.findApprovedByTrainerIncludingHidden(trainerId)) {
             Long studentId = approved.getStudentId();
             if (studentId == null || blockedStudentIds.contains(studentId)) {
                 continue;

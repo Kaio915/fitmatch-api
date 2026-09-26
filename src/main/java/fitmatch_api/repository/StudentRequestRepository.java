@@ -13,6 +13,9 @@ public interface StudentRequestRepository extends JpaRepository<StudentRequest, 
     List<StudentRequest> findByTrainerIdAndStatusOrderByCreatedAtDesc(@Param("trainerId") Long trainerId,
                                                                        @Param("status") String status);
 
+    @Query("SELECT r FROM StudentRequest r WHERE r.trainerId = :trainerId AND r.status = 'APPROVED' ORDER BY r.createdAt DESC")
+    List<StudentRequest> findApprovedByTrainerIncludingHidden(@Param("trainerId") Long trainerId);
+
     List<StudentRequest> findByTrainerIdAndStatus(Long trainerId, String status);
 
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
