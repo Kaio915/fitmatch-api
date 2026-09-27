@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface ReportRepository extends JpaRepository<Report, Long> {
@@ -17,15 +18,22 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 
     long countBySeenFalse();
 
-    // Número de USUÁRIOS distintos que possuem ao menos uma denúncia não vista.
-    @Query("SELECT COUNT(DISTINCT r.reportedUserId) FROM Report r WHERE r.seen = false")
+    // Número de USUÁRIOS distintos que possuem ao menos uma denúncia não vista
+    // e ainda em aberto (não liberada).
+    @Query("SELECT COUNT(DISTINCT r.reportedUserId) FROM Report r WHERE r.seen = false AND r.resolvedAt IS NULL")
     long countDistinctReportedUsersUnseen();
 
-    // Marca todas as denúncias como vistas (zera a contagem de "novos").
+    // Marca as denúncias em aberto como vistas (zera a contagem de "novos").
     @Modifying
     @Transactional
-    @Query("UPDATE Report r SET r.seen = true WHERE r.seen = false")
+    @Query("UPDATE Report r SET r.seen = true WHERE r.seen = false AND r.resolvedAt IS NULL")
     int markAllSeen();
+
+    // Marca como "liberadas" todas as denúncias em aberto de um usuário.
+    @Modifying
+    @Transactional
+    @Query("UPDATE Report r SET r.resolvedAt = :when WHERE r.reportedUserId = :userId AND r.resolvedAt IS NULL")
+    int markResolvedByReportedUserId(@Param("userId") Long userId, @Param("when") LocalDateTime when);
 
     // Remove as denúncias de um usuário (ao excluir a conta/usuário).
     @Modifying

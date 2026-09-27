@@ -683,10 +683,12 @@ public class AdminController {
     }
 
     // Lista consolidada de usuários reportados. Cada item representa um usuário
-    // (com os mesmos campos do histórico) acrescido de "new" (denúncia não vista),
-    // "reportCount", "lastReportAt" e "lastReportReason". Ao abrir a lista, todas
-    // as denúncias são marcadas como vistas (a contagem zera, mas os registros
-    // permanecem até o usuário ser excluído).
+    // (com os mesmos campos do histórico) que possui ao menos uma denúncia em
+    // aberto (não liberada). Além dos campos básicos, inclui "new" (denúncia não
+    // vista), "reportCount"/"openReportCount", "lastReportAt/Reason/Details" e a
+    // lista "reports" com o histórico completo (quem denunciou, quando, o motivo
+    // e se já foi liberada). Ao abrir a lista, as denúncias em aberto são marcadas
+    // como vistas.
     @GetMapping("/reports")
     @Transactional
     public List<Map<String, Object>> getReportedUsers() {
@@ -699,10 +701,12 @@ public class AdminController {
             grouped.computeIfAbsent(r.getReportedUserId(), k -> new ArrayList<>()).add(r);
         }
 
+        Map<Long, String> reporterNames = new HashMap<>();
+
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map.Entry<Long, List<Report>> entry : grouped.entrySet()) {
             Long reportedUserId = entry.getKey();
-            List<Report> userReports = entry.getValue();
+            List<Report> userReports = entry.getValue(); // ordenado por createdAt desc
 
             User user = repo.findById(reportedUserId).orElse(null);
             if (user == null) {
@@ -711,15 +715,31 @@ public class AdminController {
                 continue;
             }
 
-            boolean isNew = userReports.stream().anyMatch(r -> !r.isSeen());
+            // Só lista usuários com ao menos uma denúncia em aberto (não liberada).
+            boolean hasOpen = userReports.stream().anyMatch(r -> r.getResolvedAt() == null);
+            if (!hasOpen) {
+                continue;
+            }
+
+            boolean isNew = userReports.stream()
+                    .anyMatch(r -> r.getResolvedAt() == null && !r.isSeen());
             Report latest = userReports.get(0); // ordenado por createdAt desc
+
+            long openCount = userReports.stream().filter(r -> r.getResolvedAt() == null).count();
+
+            List<Map<String, Object>> reportItems = new ArrayList<>();
+            for (Report r : userReports) {
+                reportItems.add(reportToMap(r, reporterNames));
+            }
 
             Map<String, Object> m = adminUserToMap(user);
             m.put("new", isNew);
             m.put("reportCount", userReports.size());
+            m.put("openReportCount", openCount);
             m.put("lastReportAt", latest.getCreatedAt() == null ? null : latest.getCreatedAt().toString());
             m.put("lastReportReason", latest.getReason());
             m.put("lastReportDetails", latest.getDetails());
+            m.put("reports", reportItems);
             result.add(m);
         }
 
@@ -727,6 +747,44 @@ public class AdminController {
         reportRepo.markAllSeen();
 
         return result;
+    }
+
+    // Converte uma denúncia em um mapa exibido na lista de usuários reportados,
+    // incluindo o nome do denunciante (resolvido uma única vez por id).
+    private Map<String, Object> reportToMap(Report r, Map<Long, String> reporterNames) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", r.getId());
+        item.put("reporterId", r.getReporterId());
+        item.put("reporterName", reporterNameOf(r.getReporterId(), reporterNames));
+        item.put("reason", r.getReason());
+        item.put("details", r.getDetails());
+        item.put("createdAt", r.getCreatedAt() == null ? null : r.getCreatedAt().toString());
+        item.put("resolved", r.getResolvedAt() != null);
+        item.put("resolvedAt", r.getResolvedAt() == null ? null : r.getResolvedAt().toString());
+        return item;
+    }
+
+    private String reporterNameOf(Long reporterId, Map<Long, String> cache) {
+        if (reporterId == null) {
+            return null;
+        }
+        if (cache.containsKey(reporterId)) {
+            return cache.get(reporterId);
+        }
+        String name = repo.findById(reporterId).map(User::getName).orElse(null);
+        cache.put(reporterId, name);
+        return name;
+    }
+
+    // Libera um usuário reportado: marca como resolvidas todas as denúncias em
+    // aberto. O usuário deixa de aparecer na lista de reportados e continua
+    // usando o app normalmente. As denúncias permanecem no banco para montar o
+    // histórico caso ele seja reportado novamente.
+    @PutMapping("/reports/{reportedUserId}/release")
+    @Transactional
+    public void releaseReportedUser(@PathVariable Long reportedUserId) {
+        AuthContext.requireRole("ADMIN");
+        reportRepo.markResolvedByReportedUserId(reportedUserId, LocalDateTime.now());
     }
 
     // ================= HISTORY =================

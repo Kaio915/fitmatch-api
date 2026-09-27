@@ -41,6 +41,12 @@ public class Report {
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean seen = false;
 
+    // Quando não nulo, indica que o admin "liberou" o usuário desta denúncia.
+    // Denúncias liberadas deixam de aparecer na lista de reportados, mas ficam
+    // preservadas para montar o histórico caso o usuário seja reportado de novo.
+    @Column(name = "resolved_at")
+    private LocalDateTime resolvedAt;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
@@ -96,5 +102,13 @@ public class Report {
 
     public void setSeen(boolean seen) {
         this.seen = seen;
+    }
+
+    public LocalDateTime getResolvedAt() {
+        return resolvedAt;
+    }
+
+    public void setResolvedAt(LocalDateTime resolvedAt) {
+        this.resolvedAt = resolvedAt;
     }
 }
