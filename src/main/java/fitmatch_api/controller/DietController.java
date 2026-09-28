@@ -550,15 +550,6 @@ public class DietController {
         DietFood food = foodRepo.findByIdAndUserId(entry.getFoodId(), userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alimento não encontrado"));
 
-        // Atualiza macros do alimento (per 100g) se informados
-        if (dto.protein() != null || dto.carbs() != null || dto.fat() != null) {
-            double qtyFactor = newQty / 100.0;
-            if (dto.protein() != null) food.setProteinPer100g(dto.protein() / qtyFactor);
-            if (dto.carbs() != null)   food.setCarbsPer100g(dto.carbs() / qtyFactor);
-            if (dto.fat() != null)     food.setFatPer100g(dto.fat() / qtyFactor);
-            foodRepo.save(food);
-        }
-
         double factor = newQty / 100.0;
         return toEntryPayload(
                 entry,
@@ -782,10 +773,7 @@ public class DietController {
 
     public record EntryQuantityUpdateDto(
             Double quantityGrams,
-            String scope,
-            Double protein,  // total para a porção (opcional)
-            Double carbs,    // total para a porção (opcional)
-            Double fat       // total para a porção (opcional)
+            String scope
     ) {}
 
     public record SavedMealItemDto(
