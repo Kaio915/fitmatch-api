@@ -556,12 +556,6 @@ public class DietController {
             if (dto.protein() != null) food.setProteinPer100g(dto.protein() / qtyFactor);
             if (dto.carbs() != null)   food.setCarbsPer100g(dto.carbs() / qtyFactor);
             if (dto.fat() != null)     food.setFatPer100g(dto.fat() / qtyFactor);
-            // Recalcula calorias (4kcal/g prot e carbs, 9kcal/g fat)
-            food.setCaloriesPer100g(
-                safe(food.getProteinPer100g()) * 4
-                + safe(food.getCarbsPer100g()) * 4
-                + safe(food.getFatPer100g()) * 9
-            );
             foodRepo.save(food);
         }
 
