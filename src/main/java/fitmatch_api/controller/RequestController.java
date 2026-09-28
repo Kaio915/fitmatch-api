@@ -1523,6 +1523,68 @@ public class RequestController {
         }
     }
 
+    // Popula o campo transitório "banned" de cada solicitação com base no cadastro
+    // atual do aluno, para que o personal saiba que aquele aluno foi banido.
+    private void populateBannedFlags(List<StudentRequest> requests) {
+        if (requests == null || requests.isEmpty()) {
+            return;
+        }
+        Set<Long> studentIds = new HashSet<>();
+        for (StudentRequest req : requests) {
+            if (req.getStudentId() != null) {
+                studentIds.add(req.getStudentId());
+            }
+        }
+        if (studentIds.isEmpty()) {
+            return;
+        }
+        Map<Long, Boolean> bannedByStudent = new java.util.HashMap<>();
+        for (Long studentId : studentIds) {
+            bannedByStudent.put(studentId, userRepo.findById(studentId).map(User::isBanned).orElse(false));
+        }
+        for (StudentRequest req : requests) {
+            if (req.getStudentId() != null) {
+                req.setBanned(bannedByStudent.getOrDefault(req.getStudentId(), false));
+            }
+        }
+    }
+
+    // Chamado pelo AdminController ao banir um aluno: encerra o vínculo com todos
+    // os personals (remove a conexão e desativa os planos APROVADOS, liberando os
+    // horários), mas mantém as solicitações PENDENTES para que o personal veja o
+    // aluno como "Banido" na lista de solicitações.
+    @Transactional
+    void deactivateBannedStudentRelationships(Long studentId) {
+        List<StudentRequest> requests = requestRepo.findByStudentIdOrderByCreatedAtDesc(studentId);
+        normalizeLegacyWeeklyRequests(requests);
+
+        Set<Long> affectedTrainerIds = new HashSet<>();
+        List<StudentRequest> approvedToRelease = new ArrayList<>();
+
+        for (StudentRequest req : requests) {
+            if ("APPROVED".equals(req.getStatus())) {
+                req.setStatus("REJECTED");
+                req.setHiddenForTrainer(false);
+                approvedToRelease.add(req);
+                affectedTrainerIds.add(req.getTrainerId());
+            }
+        }
+
+        if (!approvedToRelease.isEmpty()) {
+            requestRepo.saveAll(approvedToRelease);
+            requestRepo.flush();
+        }
+
+        for (StudentRequest req : approvedToRelease) {
+            releaseRequestSlots(req);
+        }
+        for (Long trainerId : affectedTrainerIds) {
+            rebuildTrainerSlotsFromApprovedRequests(trainerId);
+        }
+
+        connectionRepo.deleteByStudentId(studentId);
+    }
+
     private void rebuildTrainerSlotsFromApprovedRequests(Long trainerId) {
         List<StudentRequest> approvedRequests = requestRepo.findByTrainerIdAndStatus(trainerId, "APPROVED");
         for (StudentRequest req : approvedRequests) {
@@ -1768,9 +1830,11 @@ public class RequestController {
         List<StudentRequest> requests = requestRepo.findByTrainerIdAndStatusOrderByCreatedAtDesc(trainerId, "PENDING");
         normalizeLegacyWeeklyRequests(requests);
         expireStalePendingRequests(requests);
-        return requests.stream()
+        List<StudentRequest> pending = requests.stream()
                 .filter(req -> "PENDING".equals(req.getStatus()))
                 .toList();
+        populateBannedFlags(pending);
+        return pending;
     }
 
     // Personal vê solicitações APROVADAS (alunos confirmados)
@@ -1779,6 +1843,7 @@ public class RequestController {
         AuthContext.requireSelfOrAdmin(trainerId);
         List<StudentRequest> requests = requestRepo.findByTrainerIdAndStatusOrderByCreatedAtDesc(trainerId, "APPROVED");
         normalizeLegacyWeeklyRequests(requests);
+        populateBannedFlags(requests);
         return requests;
     }
 
@@ -1791,8 +1856,10 @@ public class RequestController {
         if (expireStalePendingRequests(requests) > 0) {
             List<StudentRequest> refreshed = requestRepo.findByTrainerIdOrderByCreatedAtDesc(trainerId);
             normalizeLegacyWeeklyRequests(refreshed);
+            populateBannedFlags(refreshed);
             return refreshed;
         }
+        populateBannedFlags(requests);
         return requests;
     }
 
@@ -1871,6 +1938,12 @@ public class RequestController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Solicitação não encontrada"));
 
         AuthContext.requireSelfOrAdmin(req.getTrainerId());
+
+        if ("APPROVED".equals(dto.status()) && req.getStudentId() != null
+                && userRepo.findById(req.getStudentId()).map(User::isBanned).orElse(false)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Não é possível aprovar a solicitação de um aluno banido");
+        }
 
         if (!List.of("APPROVED", "REJECTED").contains(dto.status())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Status inválido: use APPROVED ou REJECTED");

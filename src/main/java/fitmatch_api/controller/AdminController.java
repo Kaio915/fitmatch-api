@@ -45,8 +45,9 @@ public class AdminController {
         private final TrainerSlotRepository slotRepo;
     private final EmailService emailService;
     private final Environment environment;
+    private final RequestController requestController;
 
-        public AdminController(UserRepository repo, ChatMessageRepository chatMessageRepo, UserHistoryRepository historyRepo, ReportRepository reportRepo, StudentRequestRepository requestRepo, StudentTrainerConnectionRepository connectionRepo, TrainerSlotRepository slotRepo, EmailService emailService, Environment environment) {
+        public AdminController(UserRepository repo, ChatMessageRepository chatMessageRepo, UserHistoryRepository historyRepo, ReportRepository reportRepo, StudentRequestRepository requestRepo, StudentTrainerConnectionRepository connectionRepo, TrainerSlotRepository slotRepo, EmailService emailService, Environment environment, RequestController requestController) {
         this.repo = repo;
         this.chatMessageRepo = chatMessageRepo;
         this.historyRepo = historyRepo;
@@ -56,6 +57,7 @@ public class AdminController {
         this.slotRepo = slotRepo;
         this.emailService = emailService;
         this.environment = environment;
+        this.requestController = requestController;
     }
 
     // ================= CPF MASK =================
@@ -612,6 +614,12 @@ public class AdminController {
                 user.setStatus(UserStatus.REJECTED);
                 user.setRejectionReason(reason);
                 repo.save(user);
+
+                // Se o aluno foi banido, encerra o vínculo com todos os personals:
+                // deixa de ser aluno, desativa os planos ativos e libera os horários.
+                if (user.getType() == UserType.aluno) {
+                        requestController.deactivateBannedStudentRelationships(id);
+                }
 
                 if (wasApproved) {
                         // Exclusão automática da conta aprovada: cria o registro de

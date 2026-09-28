@@ -58,6 +58,12 @@ public class StudentRequest {
     @Column
     private Boolean hiddenForStudent = false;
 
+    // Indica que o aluno foi banido da plataforma pelo admin. Campo transitório
+    // (não persiste no banco): preenchido na resposta para o personal exibir
+    // "Banido" no lugar do botão "Bloquear aluno".
+    @Transient
+    private boolean banned = false;
+
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
@@ -124,6 +130,9 @@ public class StudentRequest {
     public void setHiddenForStudent(Boolean hiddenForStudent) {
         this.hiddenForStudent = hiddenForStudent;
     }
+
+    public boolean isBanned() { return banned; }
+    public void setBanned(boolean banned) { this.banned = banned; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
 
