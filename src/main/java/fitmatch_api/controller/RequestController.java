@@ -1549,33 +1549,39 @@ public class RequestController {
         }
     }
 
-    // Chamado pelo AdminController ao banir um aluno: encerra o vínculo com todos
-    // os personals (remove a conexão e desativa os planos APROVADOS, liberando os
-    // horários), mas mantém as solicitações PENDENTES para que o personal veja o
-    // aluno como "Banido" na lista de solicitações.
+    // Chamado pelo AdminController ao banir ou excluir um aluno: encerra todas as
+    // solicitações, oculta-as dos dois lados e libera os horários associados.
     @Transactional
-    void deactivateBannedStudentRelationships(Long studentId) {
+    void deactivateStudentRelationships(Long studentId) {
         List<StudentRequest> requests = requestRepo.findByStudentIdOrderByCreatedAtDesc(studentId);
         normalizeLegacyWeeklyRequests(requests);
 
         Set<Long> affectedTrainerIds = new HashSet<>();
-        List<StudentRequest> approvedToRelease = new ArrayList<>();
+        List<StudentRequest> requestsToRelease = new ArrayList<>();
 
         for (StudentRequest req : requests) {
-            if ("APPROVED".equals(req.getStatus())) {
+            if (!"REJECTED".equals(req.getStatus())) {
                 req.setStatus("REJECTED");
-                req.setHiddenForTrainer(false);
-                approvedToRelease.add(req);
+                req.setHiddenForTrainer(true);
+                req.setHiddenForStudent(true);
+                requestsToRelease.add(req);
+                affectedTrainerIds.add(req.getTrainerId());
+            } else {
+                // Corrige solicitações antigas que já foram rejeitadas, mas ainda
+                // deixaram o slot REQUEST ou ficaram visíveis para algum lado.
+                req.setHiddenForTrainer(true);
+                req.setHiddenForStudent(true);
+                requestsToRelease.add(req);
                 affectedTrainerIds.add(req.getTrainerId());
             }
         }
 
-        if (!approvedToRelease.isEmpty()) {
-            requestRepo.saveAll(approvedToRelease);
+        if (!requests.isEmpty()) {
+            requestRepo.saveAll(requests);
             requestRepo.flush();
         }
 
-        for (StudentRequest req : approvedToRelease) {
+        for (StudentRequest req : requestsToRelease) {
             releaseRequestSlots(req);
         }
         for (Long trainerId : affectedTrainerIds) {

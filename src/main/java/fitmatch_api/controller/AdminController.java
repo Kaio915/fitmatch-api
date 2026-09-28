@@ -454,6 +454,13 @@ public class AdminController {
                                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                                                 "Não é permitido excluir conta de admin");
                         }
+                    if (user.getType() == UserType.aluno) {
+                        requestController.deactivateStudentRelationships(id);
+                    } else if (user.getType() == UserType.personal) {
+                        connectionRepo.deleteByTrainerId(id);
+                        requestRepo.deleteByTrainerId(id);
+                        slotRepo.deleteByTrainerId(id);
+                    }
                         repo.delete(user);
                 });
 
@@ -552,7 +559,9 @@ public class AdminController {
                 user.setRejectionReason(ADMIN_DELETED_REASON);
                 repo.save(user);
 
-                if (user.getType() == UserType.personal) {
+                if (user.getType() == UserType.aluno) {
+                    requestController.deactivateStudentRelationships(id);
+                } else if (user.getType() == UserType.personal) {
                         connectionRepo.deleteByTrainerId(id);
                         requestRepo.deleteByTrainerId(id);
                         slotRepo.deleteByTrainerId(id);
@@ -618,10 +627,10 @@ public class AdminController {
                 user.setRejectionReason(reason);
                 repo.save(user);
 
-                // Se o aluno foi banido, encerra o vínculo com todos os personals:
-                // deixa de ser aluno, desativa os planos ativos e libera os horários.
+                // Se o aluno foi banido, encerra todas as solicitações e vínculos:
+                // elas somem para ambos os lados e os horários são liberados.
                 if (user.getType() == UserType.aluno) {
-                        requestController.deactivateBannedStudentRelationships(id);
+                    requestController.deactivateStudentRelationships(id);
                 }
 
                 if (wasApproved) {
@@ -775,6 +784,7 @@ public class AdminController {
         item.put("reason", r.getReason());
         item.put("details", r.getDetails());
         item.put("createdAt", r.getCreatedAt() == null ? null : r.getCreatedAt().toString());
+        item.put("seen", r.isSeen());
         item.put("resolved", r.getResolvedAt() != null);
         item.put("resolvedAt", r.getResolvedAt() == null ? null : r.getResolvedAt().toString());
         return item;
