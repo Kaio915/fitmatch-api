@@ -701,7 +701,7 @@ public class AdminController {
             grouped.computeIfAbsent(r.getReportedUserId(), k -> new ArrayList<>()).add(r);
         }
 
-        Map<Long, String> reporterNames = new HashMap<>();
+        Map<Long, User> reporterUsers = new HashMap<>();
 
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map.Entry<Long, List<Report>> entry : grouped.entrySet()) {
@@ -729,7 +729,7 @@ public class AdminController {
 
             List<Map<String, Object>> reportItems = new ArrayList<>();
             for (Report r : userReports) {
-                reportItems.add(reportToMap(r, reporterNames));
+                reportItems.add(reportToMap(r, reporterUsers));
             }
 
             Map<String, Object> m = adminUserToMap(user);
@@ -750,12 +750,14 @@ public class AdminController {
     }
 
     // Converte uma denúncia em um mapa exibido na lista de usuários reportados,
-    // incluindo o nome do denunciante (resolvido uma única vez por id).
-    private Map<String, Object> reportToMap(Report r, Map<Long, String> reporterNames) {
+    // incluindo nome e email do denunciante (resolvidos uma única vez por id).
+    private Map<String, Object> reportToMap(Report r, Map<Long, User> reporterUsers) {
+        User reporter = reporterUser(r.getReporterId(), reporterUsers);
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("id", r.getId());
         item.put("reporterId", r.getReporterId());
-        item.put("reporterName", reporterNameOf(r.getReporterId(), reporterNames));
+        item.put("reporterName", reporter == null ? null : reporter.getName());
+        item.put("reporterEmail", reporter == null ? null : reporter.getEmail());
         item.put("reason", r.getReason());
         item.put("details", r.getDetails());
         item.put("createdAt", r.getCreatedAt() == null ? null : r.getCreatedAt().toString());
@@ -764,16 +766,16 @@ public class AdminController {
         return item;
     }
 
-    private String reporterNameOf(Long reporterId, Map<Long, String> cache) {
+    private User reporterUser(Long reporterId, Map<Long, User> cache) {
         if (reporterId == null) {
             return null;
         }
         if (cache.containsKey(reporterId)) {
             return cache.get(reporterId);
         }
-        String name = repo.findById(reporterId).map(User::getName).orElse(null);
-        cache.put(reporterId, name);
-        return name;
+        User reporter = repo.findById(reporterId).orElse(null);
+        cache.put(reporterId, reporter);
+        return reporter;
     }
 
     // Libera um usuário reportado: marca como resolvidas todas as denúncias em
