@@ -2,6 +2,10 @@ package fitmatch_api.repository;
 
 import fitmatch_api.model.DietEntry;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -21,4 +25,9 @@ public interface DietEntryRepository extends JpaRepository<DietEntry, Long> {
 
     List<DietEntry> findByUserIdAndFoodIdAndMealTypeIgnoreCaseAndEntryDateGreaterThanEqual(
             Long userId, Long foodId, String mealType, LocalDate from);
+
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from DietEntry e where e.userId = :userId")
+    int deleteByUserId(@Param("userId") Long userId);
 }

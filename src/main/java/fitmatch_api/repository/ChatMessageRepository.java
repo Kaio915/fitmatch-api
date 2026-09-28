@@ -75,4 +75,9 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
             @Param("adminId") Long adminId,
             @Param("userIds") Collection<Long> userIds
     );
+
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM ChatMessage m WHERE m.senderId = :userId OR m.receiverId = :userId")
+    void deleteAllMessagesInvolvingUser(@Param("userId") Long userId);
 }

@@ -2,7 +2,10 @@ package fitmatch_api.repository;
 
 import fitmatch_api.model.TrainerRating;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -20,4 +23,14 @@ public interface TrainerRatingRepository extends JpaRepository<TrainerRating, Lo
     @Query("SELECT r.trainerId AS trainerId, AVG(r.stars) AS avgStars, COUNT(r.id) AS count " +
            "FROM TrainerRating r GROUP BY r.trainerId")
     List<RatingSummary> findRatingSummaries();
+
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from TrainerRating r where r.trainerId = :trainerId")
+    int deleteByTrainerId(@Param("trainerId") Long trainerId);
+
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from TrainerRating r where r.studentId = :studentId")
+    int deleteByStudentId(@Param("studentId") Long studentId);
 }

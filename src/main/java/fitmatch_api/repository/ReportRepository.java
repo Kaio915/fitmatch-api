@@ -40,4 +40,10 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
     @Transactional
     @Query("DELETE FROM Report r WHERE r.reportedUserId = :userId")
     int deleteByReportedUserId(@Param("userId") Long userId);
+
+    // Remove as denúncias FEITAS por um usuário (ao resetar a conta).
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM Report r WHERE r.reporterId = :userId")
+    int deleteByReporterId(@Param("userId") Long userId);
 }

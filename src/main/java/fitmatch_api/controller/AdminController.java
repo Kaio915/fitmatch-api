@@ -15,6 +15,7 @@ import fitmatch_api.repository.UserHistoryRepository;
 import fitmatch_api.repository.UserRepository;
 import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.EmailService;
+import fitmatch_api.service.UserDataResetService;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,8 +47,9 @@ public class AdminController {
     private final EmailService emailService;
     private final Environment environment;
     private final RequestController requestController;
+    private final UserDataResetService userDataResetService;
 
-        public AdminController(UserRepository repo, ChatMessageRepository chatMessageRepo, UserHistoryRepository historyRepo, ReportRepository reportRepo, StudentRequestRepository requestRepo, StudentTrainerConnectionRepository connectionRepo, TrainerSlotRepository slotRepo, EmailService emailService, Environment environment, RequestController requestController) {
+        public AdminController(UserRepository repo, ChatMessageRepository chatMessageRepo, UserHistoryRepository historyRepo, ReportRepository reportRepo, StudentRequestRepository requestRepo, StudentTrainerConnectionRepository connectionRepo, TrainerSlotRepository slotRepo, EmailService emailService, Environment environment, RequestController requestController, UserDataResetService userDataResetService) {
         this.repo = repo;
         this.chatMessageRepo = chatMessageRepo;
         this.historyRepo = historyRepo;
@@ -58,6 +60,7 @@ public class AdminController {
         this.emailService = emailService;
         this.environment = environment;
         this.requestController = requestController;
+        this.userDataResetService = userDataResetService;
     }
 
     // ================= CPF MASK =================
@@ -628,7 +631,6 @@ public class AdminController {
                         List<UserHistory> approved = historyRepo.findActiveApprovedByUserId(id);
                         for (UserHistory h : approved) {
                                 h.setDeleted(true);
-                                h.setRejectionReason(reason);
                                 historyRepo.save(h);
                         }
                         emailService.sendAccountDeletedEmail(user, reason);
@@ -665,8 +667,9 @@ public class AdminController {
 
                 List<UserHistory> bannedRecords = historyRepo.findByUserIdAndBanned(id, true);
                 for (UserHistory h : bannedRecords) {
-                        // Reverte o banimento e remove o motivo do banimento, para
-                        // que ele deixe de aparecer no campo após o desbanimento.
+                        // Reverte o estado de banido, mas PRESERVA o motivo do
+                        // banimento (bannedReason) para exibi-lo no chat quando o
+                        // mesmo email/cpf se cadastrar novamente após o desbanimento.
                         if (h.getBannedReason() != null
                                         && h.getBannedReason().equals(h.getRejectionReason())) {
                                 // O motivo de rejeição era, na verdade, o motivo do
@@ -674,9 +677,12 @@ public class AdminController {
                                 h.setRejectionReason(null);
                         }
                         h.setBanned(false);
-                        h.setBannedReason(null);
                         historyRepo.save(h);
                 }
+
+                // Reseta todos os dados do usuário (solicitações, conexões, treinos,
+                // chats, avaliações, dieta etc.) como se fosse uma conta nova.
+                userDataResetService.resetUserData(id, user.getType());
         }
 
     // ================= REPORTS (USUÁRIOS REPORTADOS) =================
@@ -950,8 +956,13 @@ public class AdminController {
         }
 
         // Todas as exclusões de conta do email (da mais recente para a mais antiga).
+        // Ignora registros sem motivo — caso do histórico aprovado que foi marcado
+        // como excluído por um BANIMENTO (o motivo fica apenas no banimento).
         List<UserHistory> exclusions = historyRepo
-                .findExclusionsByEmail(normalizedEmail);
+                .findExclusionsByEmail(normalizedEmail)
+                .stream()
+                .filter(h -> h.getRejectionReason() != null && !h.getRejectionReason().isBlank())
+                .toList();
 
         Map<String, Object> m = new HashMap<>();
         if (exclusions.isEmpty()) {
@@ -982,8 +993,8 @@ public class AdminController {
     // Retorna TODOS os banimentos anteriores de um email (da mais recente para
     // a mais antiga), usados no chat para avisar o admin quando o mesmo usuário
     // (email/cpf) se cadastra novamente após ter sido banido e desbanido.
-    // O motivo é removido ao desbanir, então só retorna banimentos que ainda
-    // não foram desfeitos.
+    // O motivo (bannedReason) é preservado mesmo após o desbanimento, então o
+    // aviso continua sendo exibido.
     @GetMapping("/previous-ban")
     public Map<String, Object> getPreviousBan(@RequestParam String email) {
 

@@ -20,4 +20,14 @@ public interface BlockedStudentRepository extends JpaRepository<BlockedStudent, 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from BlockedStudent b where b.trainerId = :trainerId and b.studentId = :studentId")
     int deleteByTrainerIdAndStudentId(@Param("trainerId") Long trainerId, @Param("studentId") Long studentId);
+
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from BlockedStudent b where b.studentId = :studentId")
+    int deleteByStudentId(@Param("studentId") Long studentId);
+
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from BlockedStudent b where b.trainerId = :trainerId")
+    int deleteByTrainerId(@Param("trainerId") Long trainerId);
 }

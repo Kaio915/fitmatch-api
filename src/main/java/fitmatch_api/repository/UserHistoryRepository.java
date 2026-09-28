@@ -87,11 +87,10 @@ public interface UserHistoryRepository extends JpaRepository<UserHistory, Long> 
     @Query("SELECT h FROM UserHistory h WHERE h.email = :email AND h.status = 'REJECTED' AND h.bannedReason IS NULL AND h.rejectionReason IS NOT NULL ORDER BY h.recordedAt DESC")
     List<UserHistory> findRejectionsByEmail(@Param("email") String email);
 
-    // Banimentos de um email que ainda estão ATIVOS (banned = true) — usados no
-    // "previous-ban". Registros já desbanidos (banned = false) não são exibidos,
-    // mesmo que ainda tenham o motivo gravado (dados antigos preservados antes
-    // da correção do desbanimento).
-    @Query("SELECT h FROM UserHistory h WHERE h.email = :email AND h.banned = true AND h.bannedReason IS NOT NULL ORDER BY h.recordedAt DESC")
+    // Todos os banimentos de um email (o motivo fica preservado mesmo após o
+    // desbanimento) — usados no "previous-ban" para exibir "usuário banido
+    // anteriormente" quando o mesmo email/cpf se cadastra novamente.
+    @Query("SELECT h FROM UserHistory h WHERE h.email = :email AND h.bannedReason IS NOT NULL ORDER BY h.recordedAt DESC")
     List<UserHistory> findBansByEmail(@Param("email") String email);
 
     // Último registro de qualquer status de um usuário — usado para marcar como
