@@ -519,6 +519,7 @@ public class DietController {
 
         double newQty = normalizePositive(dto.quantityGrams(), "Quantidade");
         String scope = dto.scope() != null ? dto.scope().toUpperCase(Locale.ROOT) : "TODAY";
+        double previousQty = safe(entry.getQuantityGrams());
 
         // Atualiza a entrada específica
         entry.setQuantityGrams(newQty);
@@ -530,7 +531,8 @@ public class DietController {
                     .findByUserIdAndFoodIdAndMealTypeIgnoreCaseAndEntryDateGreaterThanEqual(
                             userId, entry.getFoodId(), entry.getMealType(), LocalDate.now());
             for (DietEntry e : futures) {
-                if (!e.getId().equals(entry.getId())) {
+                if (!e.getId().equals(entry.getId())
+                        && Math.abs(safe(e.getQuantityGrams()) - previousQty) < 0.0001) {
                     e.setQuantityGrams(newQty);
                     entryRepo.save(e);
                 }
