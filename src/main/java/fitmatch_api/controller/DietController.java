@@ -484,6 +484,38 @@ public class DietController {
         );
     }
 
+    @Transactional
+    @PatchMapping("/{userId}/entries/meal-type")
+    public Map<String, Object> renameEntriesMealType(
+            @PathVariable Long userId,
+            @RequestBody EntryMealTypeUpdateDto dto
+    ) {
+        ensureUserExists(userId);
+        AuthContext.requireSelfOrAdmin(userId);
+
+        String oldMealType = normalizeMealType(dto.oldMealType());
+        String newMealType = normalizeMealType(dto.newMealType());
+        LocalDate entryDate = parseDate(dto.date());
+        if (isNotToday(entryDate)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Somente o dia atual pode ser editado no diário"
+            );
+        }
+
+        int updatedCount = 0;
+        List<DietEntry> entries = entryRepo.findByUserIdAndEntryDateOrderByCreatedAtAsc(userId, entryDate);
+        for (DietEntry entry : entries) {
+            if (entry.getMealType() != null && entry.getMealType().equalsIgnoreCase(oldMealType)) {
+                entry.setMealType(newMealType);
+                updatedCount++;
+            }
+        }
+        entryRepo.saveAll(entries);
+
+        return Map.of("updatedCount", updatedCount, "mealType", newMealType);
+    }
+
     @DeleteMapping("/{userId}/entries/{entryId}")
     public void deleteEntry(
             @PathVariable Long userId,
@@ -772,6 +804,8 @@ public class DietController {
     public record GoalUpsertDto(Double basalKcal, Double targetKcal) {}
 
     public record EntryCreateDto(Long foodId, String mealType, Double quantityGrams, String date) {}
+
+    public record EntryMealTypeUpdateDto(String oldMealType, String newMealType, String date) {}
 
     public record EntryQuantityUpdateDto(
             Double quantityGrams,
