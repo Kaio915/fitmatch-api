@@ -171,11 +171,16 @@ public class FatSecretService {
 
         try {
             String termoNormalizado = termo.trim();
-            List<JsonNode> items = searchFoodItems(token, termoNormalizado);
             String fallbackTermo = findEnglishFallback(termoNormalizado);
-            if (items.isEmpty() && fallbackTermo != null) {
-                log.info("Nenhum resultado para '{}'. Tentando fallback em inglês: '{}'.", termoNormalizado, fallbackTermo);
+            List<JsonNode> items;
+            if (fallbackTermo != null && !fallbackTermo.equalsIgnoreCase(termoNormalizado)) {
+                log.info("Buscando '{}' pelo termo equivalente em inglês: '{}'.", termoNormalizado, fallbackTermo);
                 items = searchFoodItems(token, fallbackTermo);
+                if (items.isEmpty()) {
+                    items = searchFoodItems(token, termoNormalizado);
+                }
+            } else {
+                items = searchFoodItems(token, termoNormalizado);
             }
 
             int filtered = (int) items.stream()
