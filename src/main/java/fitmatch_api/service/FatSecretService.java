@@ -113,6 +113,14 @@ public class FatSecretService {
             Map.entry("noodles", "Macarrão")
     );
 
+            private static final Map<String, String> PT_TO_EN_PRIORITY = Map.ofEntries(
+                Map.entry("milho", "corn"),
+                Map.entry("carne", "meat"),
+                Map.entry("carne bovina", "beef"),
+                Map.entry("carne suína", "pork"),
+                Map.entry("frango", "chicken")
+            );
+
     private static final Pattern ENGLISH_TERM_PATTERN = Pattern.compile(
             "\\b(" + String.join("|", EN_TO_PT.keySet()) + ")\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
@@ -264,6 +272,10 @@ public class FatSecretService {
 
     private String findEnglishFallback(String term) {
         String normalizedTerm = term.toLowerCase(Locale.ROOT);
+        String prioritizedTerm = PT_TO_EN_PRIORITY.get(normalizedTerm);
+        if (prioritizedTerm != null) {
+            return prioritizedTerm;
+        }
         return EN_TO_PT.entrySet().stream()
                 .filter(entry -> entry.getValue().toLowerCase(Locale.ROOT).equals(normalizedTerm))
                 .map(Map.Entry::getKey)
