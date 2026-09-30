@@ -36,6 +36,9 @@ public class DietFood {
     @Column(nullable = false)
     private boolean favorite;
 
+    @Column
+    private Boolean custom = true;
+
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
@@ -116,6 +119,14 @@ public class DietFood {
 
     public void setFavorite(boolean favorite) {
         this.favorite = favorite;
+    }
+
+    public boolean isCustom() {
+        return Boolean.TRUE.equals(custom);
+    }
+
+    public void setCustom(Boolean custom) {
+        this.custom = custom;
     }
 
     public LocalDateTime getCreatedAt() {

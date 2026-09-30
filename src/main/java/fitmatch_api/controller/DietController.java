@@ -96,6 +96,7 @@ public class DietController {
         food.setCarbsPer100g(normalizeNonNegative(dto.carbsPer100g(), "Carboidratos"));
         food.setFatPer100g(normalizeNonNegative(dto.fatPer100g(), "Gordura"));
         food.setFavorite(Boolean.TRUE.equals(dto.favorite()));
+        food.setCustom(dto.custom() == null || dto.custom());
 
         return toFoodPayload(foodRepo.save(food));
     }
@@ -672,6 +673,7 @@ public class DietController {
         payload.put("carbsPer100g", round1(safe(food.getCarbsPer100g())));
         payload.put("fatPer100g", round1(safe(food.getFatPer100g())));
         payload.put("favorite", food.isFavorite());
+        payload.put("custom", food.isCustom());
         return payload;
     }
 
@@ -768,6 +770,7 @@ public class DietController {
         created.setCarbsPer100g(Math.max(0.0, safe(templateItem.getCarbs()) * factor));
         created.setFatPer100g(Math.max(0.0, safe(templateItem.getFat()) * factor));
         created.setFavorite(false);
+        created.setCustom(false);
         return foodRepo.save(created);
     }
 
@@ -796,7 +799,8 @@ public class DietController {
             Double proteinPer100g,
             Double carbsPer100g,
             Double fatPer100g,
-            Boolean favorite
+                Boolean favorite,
+                Boolean custom
     ) {}
 
     public record FavoriteToggleDto(Boolean favorite) {}
