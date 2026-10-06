@@ -61,6 +61,13 @@ public class User {
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean banned = false;
 
+    // ================= FCM (NOTIFICAÇÃO PUSH) =================
+    // Token do dispositivo para envio de notificações via Firebase Cloud Messaging.
+    // Nunca deve ser exposto nas respostas da API (por isso @JsonIgnore).
+    @JsonIgnore
+    @Column(name = "fcm_token", length = 512)
+    private String fcmToken;
+
     // ================= CAMPOS DO ALUNO =================
 
     @Column(columnDefinition = "TEXT")
@@ -140,6 +147,11 @@ public class User {
 
     public boolean isBanned() {
         return banned;
+    }
+
+    @JsonIgnore
+    public String getFcmToken() {
+        return fcmToken;
     }
 
     public String getObjetivos() {
@@ -226,6 +238,10 @@ public class User {
 
     public void setBanned(boolean banned) {
         this.banned = banned;
+    }
+
+    public void setFcmToken(String fcmToken) {
+        this.fcmToken = fcmToken;
     }
 
     public void setObjetivos(String objetivos) {
