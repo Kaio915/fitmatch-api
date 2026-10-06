@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -234,6 +235,20 @@ public class ChatController {
         return conversation.stream()
             .filter(message -> belongsToRequestWindow(message, requestId, startAt, lockAt, requestSlots))
                 .collect(Collectors.toList());
+    }
+
+    /** Marca como lidas as mensagens enviadas pelo outro usuário para o leitor. */
+    @PostMapping("/read")
+    public Map<String, Object> markAsRead(@RequestBody ReadDto dto) {
+        if (dto.readerId() == null || dto.senderId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "readerId e senderId são obrigatórios");
+        }
+
+        AuthContext.requireSelfOrAdmin(dto.readerId());
+
+        int updated = repo.markMessagesAsRead(dto.readerId(), dto.senderId());
+        return Map.of("updated", updated);
     }
 
     /**
@@ -464,4 +479,5 @@ public class ChatController {
     }
 
     record MessageDto(Long senderId, Long receiverId, String text, Boolean temporaryRejection) {}
+    record ReadDto(Long readerId, Long senderId) {}
 }

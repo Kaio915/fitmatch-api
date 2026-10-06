@@ -29,6 +29,9 @@ public class ChatMessage {
     @Column(name = "is_termination", nullable = false, columnDefinition = "boolean default false")
     private boolean termination = false;
 
+    @Column(name = "is_read", nullable = false, columnDefinition = "boolean default false")
+    private boolean read = false;
+
     @PrePersist
     protected void onCreate() {
         sentAt = LocalDateTime.now();
@@ -50,4 +53,7 @@ public class ChatMessage {
 
     public boolean isTermination() { return termination; }
     public void setTermination(boolean termination) { this.termination = termination; }
+
+    public boolean isRead() { return read; }
+    public void setRead(boolean read) { this.read = read; }
 }

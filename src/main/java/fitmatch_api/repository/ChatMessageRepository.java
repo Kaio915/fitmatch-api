@@ -34,6 +34,15 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
             Pageable pageable
     );
 
+    @Modifying
+    @Transactional
+    @Query("UPDATE ChatMessage m SET m.read = true " +
+           "WHERE m.senderId = :senderId AND m.receiverId = :readerId AND m.read = false")
+    int markMessagesAsRead(
+            @Param("readerId") Long readerId,
+            @Param("senderId") Long senderId
+    );
+
     Optional<ChatMessage> findTopBySenderIdAndReceiverIdOrderBySentAtDesc(Long senderId, Long receiverId);
 
     @Query("SELECT COUNT(m) > 0 FROM ChatMessage m WHERE " +
