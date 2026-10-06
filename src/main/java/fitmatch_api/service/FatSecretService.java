@@ -237,8 +237,8 @@ public class FatSecretService {
                 + "?method=foods.search"
                 + "&search_expression=" + encodedTerm
                 + "&format=json"
-                + "&region=BR"
-                + "&language=pt";
+                + "&page_number=0"
+                + "&max_results=20";
 
         log.info("Consultando FatSecret: {}", url);
 

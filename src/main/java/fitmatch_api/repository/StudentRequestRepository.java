@@ -28,7 +28,7 @@ public interface StudentRequestRepository extends JpaRepository<StudentRequest, 
     @Query("delete from StudentRequest r where r.studentId = :studentId")
     int deleteByStudentId(@Param("studentId") Long studentId);
 
-    @Query("SELECT r FROM StudentRequest r WHERE r.trainerId = :trainerId AND (COALESCE(r.hiddenForTrainer, false) = false OR r.status = 'APPROVED') ORDER BY r.createdAt DESC")
+    @Query("SELECT r FROM StudentRequest r WHERE r.trainerId = :trainerId ORDER BY r.createdAt DESC")
     List<StudentRequest> findByTrainerIdOrderByCreatedAtDesc(@Param("trainerId") Long trainerId);
 
     List<StudentRequest> findByStudentIdOrderByCreatedAtDesc(Long studentId);
