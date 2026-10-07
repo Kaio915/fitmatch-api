@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
@@ -274,12 +275,24 @@ public class ChatController {
         return Map.of("updated", updated);
     }
 
-    /** Contagem de mensagens não lidas do usuário autenticado (badge do chat). */
+    /**
+     * Contagem de mensagens não lidas do usuário autenticado, agrupada por
+     * remetente (senderId). O app usa esse mapa para exibir o badge no botão
+     * de chat de cada conversa individualmente.
+     */
     @GetMapping("/unread-count")
-    public Map<String, Object> getUnreadCount() {
+    public Map<Long, Long> getUnreadCount() {
         JwtPrincipal principal = AuthContext.requirePrincipal();
-        long unread = repo.countUnreadMessages(principal.userId());
-        return Map.of("unreadCount", unread);
+        List<Object[]> rows = repo.countUnreadMessagesPerSender(principal.userId());
+        Map<Long, Long> countsPerUser = new LinkedHashMap<>();
+        for (Object[] row : rows) {
+            Long senderId = row[0] == null ? null : ((Number) row[0]).longValue();
+            Long count = row[1] == null ? 0L : ((Number) row[1]).longValue();
+            if (senderId != null) {
+                countsPerUser.put(senderId, count);
+            }
+        }
+        return countsPerUser;
     }
 
     /**

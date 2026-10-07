@@ -80,6 +80,7 @@ public class NotificationService {
             String messageId = messaging.send(message);
             log.info("Notificação push enviada ({}). Destinatário: {}", messageId, receiverId);
         } catch (FirebaseMessagingException e) {
+            log.error("Erro ao enviar push", e);
             log.warn("Falha ao enviar notificação push para {}: {}", receiverId, e.getMessage());
             // TODO(opcional): se e.getMessagingErrorCode() == UNREGISTERED,
             // limpar o fcmToken do usuário (token inválido/desinstalado).

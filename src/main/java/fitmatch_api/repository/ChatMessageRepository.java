@@ -47,6 +47,12 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     @Query("SELECT COUNT(m) FROM ChatMessage m WHERE m.receiverId = :userId AND m.read = false")
     long countUnreadMessages(@Param("userId") Long userId);
 
+    /** Contagem de mensagens não lidas agrupadas por remetente (badge por conversa). */
+    @Query("SELECT m.senderId, COUNT(m) FROM ChatMessage m " +
+           "WHERE m.receiverId = :userId AND m.read = false " +
+           "GROUP BY m.senderId")
+    List<Object[]> countUnreadMessagesPerSender(@Param("userId") Long userId);
+
     Optional<ChatMessage> findTopBySenderIdAndReceiverIdOrderBySentAtDesc(Long senderId, Long receiverId);
 
     @Query("SELECT COUNT(m) > 0 FROM ChatMessage m WHERE " +
