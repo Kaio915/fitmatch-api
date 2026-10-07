@@ -10,3 +10,8 @@ target/
 # Logs e artefatos de build
 *.log
 backend_log.txt
+
+# Firebase / credenciais de serviço
+serviceAccountKey.json
+google-services.json
+GoogleService-Info.plist

@@ -4,6 +4,7 @@ import fitmatch_api.model.BlockedStudent;
 import fitmatch_api.model.ChatMessage;
 import fitmatch_api.model.StudentRequest;
 import fitmatch_api.model.StudentTrainerConnection;
+import fitmatch_api.model.User;
 import fitmatch_api.repository.BlockedStudentRepository;
 import fitmatch_api.repository.ChatMessageRepository;
 import fitmatch_api.repository.StudentRequestRepository;
@@ -12,6 +13,7 @@ import fitmatch_api.repository.TrainerSlotRepository;
 import fitmatch_api.repository.UserRepository;
 import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.BlockedStudentService;
+import fitmatch_api.service.NotificationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -41,6 +43,7 @@ public class ConnectionController {
         private final TrainerSlotRepository slotRepo;
     private final BlockedStudentService blockedStudentService;
     private final ChatMessageRepository chatMessageRepo;
+    private final NotificationService notificationService;
         private static final Pattern DAY_TIME_PATTERN_DOUBLE = Pattern.compile(
             "\\\"dayName\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"\\s*,\\s*\\\"time\\\"\\s*:\\s*\\\"([^\\\"]+)\\\""
         );
@@ -64,7 +67,8 @@ public class ConnectionController {
             StudentRequestRepository requestRepo,
             TrainerSlotRepository slotRepo,
             BlockedStudentService blockedStudentService,
-            ChatMessageRepository chatMessageRepo
+            ChatMessageRepository chatMessageRepo,
+            NotificationService notificationService
     ) {
         this.repo = repo;
         this.userRepo = userRepo;
@@ -73,6 +77,18 @@ public class ConnectionController {
         this.slotRepo = slotRepo;
         this.blockedStudentService = blockedStudentService;
         this.chatMessageRepo = chatMessageRepo;
+        this.notificationService = notificationService;
+    }
+
+    private void sendChatPushNotification(Long senderId, Long receiverId, String text) {
+        User receiver = userRepo.findById(receiverId).orElse(null);
+        if (receiver == null || receiver.getFcmToken() == null || receiver.getFcmToken().isBlank()) {
+            return;
+        }
+        User sender = userRepo.findById(senderId).orElse(null);
+        String senderName = sender == null ? null : sender.getName();
+        notificationService.sendChatMessageNotification(
+                receiver.getFcmToken(), senderId, receiverId, senderName, text);
     }
 
     private List<Map<String, String>> parseSlotsFromJson(String rawJson) {
@@ -487,8 +503,10 @@ public class ConnectionController {
         msg.setSenderId(trainerId);
         msg.setReceiverId(studentId);
         msg.setTermination(true);
-        msg.setText(appendRequestMarker("Olá, " + studentName + ". " + trainerName + " cancelou o plano aprovado de " + slotsText + " e você não faz mais parte de Meus Alunos deste personal.", referenceReq));
+        String text = "Olá, " + studentName + ". " + trainerName + " cancelou o plano aprovado de " + slotsText + " e você não faz mais parte de Meus Alunos deste personal.";
+        msg.setText(appendRequestMarker(text, referenceReq));
         chatMessageRepo.save(msg);
+        sendChatPushNotification(trainerId, studentId, text);
     }
 
     private void sendPendingRejectedAfterBlockMessage(Long trainerId, Long studentId, StudentRequest pendingReq) {
@@ -505,6 +523,7 @@ public class ConnectionController {
         String text = "❌ Sua solicitação foi recusada por " + trainerName + ". Horário: " + slotsText + ".";
         msg.setText(appendRequestMarker(text, pendingReq));
         chatMessageRepo.save(msg);
+        sendChatPushNotification(trainerId, studentId, text);
     }
 
     private List<fitmatch_api.model.TrainerSlot> computePreservedSlots(Long trainerId, Long studentId) {

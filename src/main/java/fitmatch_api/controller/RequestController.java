@@ -14,6 +14,7 @@ import fitmatch_api.model.User;
 import fitmatch_api.security.AuthContext;
 import fitmatch_api.service.BlockedStudentService;
 import fitmatch_api.service.EmailService;
+import fitmatch_api.service.NotificationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -49,6 +50,7 @@ public class RequestController {
     private final BlockedStudentService blockedStudentService;
     private final EmailService emailService;
     private final UserRepository userRepo;
+    private final NotificationService notificationService;
         private static final Pattern DAY_TIME_PATTERN_DOUBLE = Pattern.compile(
             "\\\"dayName\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"\\s*,\\s*\\\"time\\\"\\s*:\\s*\\\"([^\\\"]+)\\\""
         );
@@ -74,7 +76,8 @@ public class RequestController {
             ChatMessageRepository chatMessageRepo,
             BlockedStudentService blockedStudentService,
             UserRepository userRepo,
-            EmailService emailService
+            EmailService emailService,
+            NotificationService notificationService
     ) {
         this.requestRepo = requestRepo;
         this.slotRepo = slotRepo;
@@ -84,6 +87,18 @@ public class RequestController {
         this.blockedStudentService = blockedStudentService;
         this.userRepo = userRepo;
         this.emailService = emailService;
+        this.notificationService = notificationService;
+    }
+
+    private void sendChatPushNotification(Long senderId, Long receiverId, String text) {
+        User receiver = userRepo.findById(receiverId).orElse(null);
+        if (receiver == null || receiver.getFcmToken() == null || receiver.getFcmToken().isBlank()) {
+            return;
+        }
+        User sender = userRepo.findById(senderId).orElse(null);
+        String senderName = sender == null ? null : sender.getName();
+        notificationService.sendChatMessageNotification(
+                receiver.getFcmToken(), senderId, receiverId, senderName, text);
     }
 
     private List<Map<String, String>> parseSlotsFromJson(String rawJson) {
@@ -990,13 +1005,12 @@ public class RequestController {
         ChatMessage msg = new ChatMessage();
         msg.setSenderId(req.getTrainerId());
         msg.setReceiverId(req.getStudentId());
-        msg.setText(appendRequestMarker(
-                "O personal " + trainerName +
-                        " não respondeu a sua solicitação para " + slotsText +
-                        " e o tempo expirou. Envie uma nova solicitação.",
-                req
-        ));
+        String text = "O personal " + trainerName +
+                " não respondeu a sua solicitação para " + slotsText +
+                " e o tempo expirou. Envie uma nova solicitação.";
+        msg.setText(appendRequestMarker(text, req));
         chatMessageRepo.save(msg);
+        sendChatPushNotification(req.getTrainerId(), req.getStudentId(), text);
     }
 
     private List<Map<String, String>> extractSelectedSlots(SendRequestDto dto) {
@@ -1717,6 +1731,7 @@ public class RequestController {
         }
         msg.setText(appendRequestMarker(text, req));
         chatMessageRepo.save(msg);
+        sendChatPushNotification(req.getStudentId(), req.getTrainerId(), text);
     }
 
     private boolean hasActiveRequestBetween(Long studentId, Long trainerId) {
@@ -1775,6 +1790,7 @@ public class RequestController {
         }
         msg.setText(appendRequestMarker(text, referenceReq));
         chatMessageRepo.save(msg);
+        sendChatPushNotification(trainerId, studentId, text);
     }
 
     private void sendPendingRejectedAfterBlockMessage(Long trainerId, Long studentId, StudentRequest pendingReq) {
@@ -1792,6 +1808,7 @@ public class RequestController {
         String text = "❌ Sua solicitação foi recusada por " + trainerName + ". Horário: " + slotsText + ".";
         msg.setText(appendRequestMarker(text, pendingReq));
         chatMessageRepo.save(msg);
+        sendChatPushNotification(trainerId, studentId, text);
     }
 
     private List<TrainerSlot> computePreservedSlots(Long trainerId, Long studentId) {
