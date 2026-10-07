@@ -80,14 +80,6 @@
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-mail</artifactId>
 	</dependency>
-	<!-- Firebase Cloud Messaging (Notificações Push) -->
-	<dependency>
-		<groupId>com.google.firebase</groupId>
-		<artifactId>firebase-admin</artifactId>
-		<version>9.11.0</version>
-	</dependency>
-
-
 	</dependencies>
 
 	<build>

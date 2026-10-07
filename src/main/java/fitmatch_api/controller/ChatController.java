@@ -10,9 +10,7 @@ import fitmatch_api.repository.ChatMessageRepository;
 import fitmatch_api.repository.StudentRequestRepository;
 import fitmatch_api.repository.UserRepository;
 import fitmatch_api.security.AuthContext;
-import fitmatch_api.security.JwtPrincipal;
 import fitmatch_api.service.EmailService;
-import fitmatch_api.service.NotificationService;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -23,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
@@ -50,22 +47,19 @@ public class ChatController {
     private final UserRepository userRepo;
     private final StudentRequestRepository requestRepo;
     private final EmailService emailService;
-    private final NotificationService notificationService;
 
     public ChatController(
             ChatMessageRepository repo,
             BlockedStudentRepository blockedStudentRepo,
             UserRepository userRepo,
             StudentRequestRepository requestRepo,
-            EmailService emailService,
-            NotificationService notificationService
+            EmailService emailService
     ) {
         this.repo = repo;
         this.blockedStudentRepo = blockedStudentRepo;
         this.userRepo = userRepo;
         this.requestRepo = requestRepo;
         this.emailService = emailService;
-        this.notificationService = notificationService;
     }
 
         private boolean hasActiveRequest(Long studentId, Long trainerId) {
@@ -144,25 +138,7 @@ public class ChatController {
 
         sendAdminMessageEmailIfApplicable(dto.senderId(), dto.receiverId(), dto.text());
 
-        sendChatPushNotification(dto.senderId(), dto.receiverId(), dto.text());
-
         return saved;
-    }
-
-    /**
-     * Dispara notificação push para o destinatário quando uma mensagem é enviada.
-     * O nome do remetente e o trecho da mensagem são obtidos aqui e repassados ao
-     * NotificationService (que cuida da privacidade no payload).
-     */
-    private void sendChatPushNotification(Long senderId, Long receiverId, String text) {
-        User receiver = userRepo.findById(receiverId).orElse(null);
-        if (receiver == null || receiver.getFcmToken() == null || receiver.getFcmToken().isBlank()) {
-            return;
-        }
-        User sender = userRepo.findById(senderId).orElse(null);
-        String senderName = sender == null ? null : sender.getName();
-        notificationService.sendChatMessageNotification(
-                receiver.getFcmToken(), senderId, receiverId, senderName, text);
     }
 
     private User validateTemporaryRejection(Long receiverId) {
@@ -273,26 +249,6 @@ public class ChatController {
 
         int updated = repo.markMessagesAsRead(dto.readerId(), dto.senderId());
         return Map.of("updated", updated);
-    }
-
-    /**
-     * Contagem de mensagens não lidas do usuário autenticado, agrupada por
-     * remetente (senderId). O app usa esse mapa para exibir o badge no botão
-     * de chat de cada conversa individualmente.
-     */
-    @GetMapping("/unread-count")
-    public Map<Long, Long> getUnreadCount() {
-        JwtPrincipal principal = AuthContext.requirePrincipal();
-        List<Object[]> rows = repo.countUnreadMessagesPerSender(principal.userId());
-        Map<Long, Long> countsPerUser = new LinkedHashMap<>();
-        for (Object[] row : rows) {
-            Long senderId = row[0] == null ? null : ((Number) row[0]).longValue();
-            Long count = row[1] == null ? 0L : ((Number) row[1]).longValue();
-            if (senderId != null) {
-                countsPerUser.put(senderId, count);
-            }
-        }
-        return countsPerUser;
     }
 
     /**
