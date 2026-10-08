@@ -1,5 +1,6 @@
 package fitmatch_api.controller;
 
+import fitmatch_api.dto.AlimentoServingDTO;
 import fitmatch_api.model.DietEntry;
 import fitmatch_api.model.DietFood;
 import fitmatch_api.model.DietGoal;
@@ -16,6 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
 import java.util.*;
@@ -40,6 +42,7 @@ public class DietController {
     private final DietSavedMealRepository savedMealRepo;
     private final UserRepository userRepo;
     private final EdamamFoodService edamamFoodService;
+    private final ObjectMapper objectMapper;
 
     public DietController(
             DietFoodRepository foodRepo,
@@ -47,7 +50,8 @@ public class DietController {
             DietGoalRepository goalRepo,
             DietSavedMealRepository savedMealRepo,
             UserRepository userRepo,
-            EdamamFoodService edamamFoodService
+            EdamamFoodService edamamFoodService,
+            ObjectMapper objectMapper
     ) {
         this.foodRepo = foodRepo;
         this.entryRepo = entryRepo;
@@ -55,6 +59,7 @@ public class DietController {
         this.savedMealRepo = savedMealRepo;
         this.userRepo = userRepo;
         this.edamamFoodService = edamamFoodService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping("/{userId}/edamam/search")
@@ -100,6 +105,7 @@ public class DietController {
         food.setServingDescription(dto.servingDescription());
         food.setServingAmountGrams(dto.servingAmountGrams());
         food.setServingUnit(dto.servingUnit());
+        food.setServingsJson(serializeServings(dto.servings()));
 
         return toFoodPayload(foodRepo.save(food));
     }
@@ -132,6 +138,7 @@ public class DietController {
         food.setServingDescription(dto.servingDescription());
         food.setServingAmountGrams(dto.servingAmountGrams());
         food.setServingUnit(dto.servingUnit());
+        food.setServingsJson(serializeServings(dto.servings()));
 
         return toFoodPayload(foodRepo.save(food));
     }
@@ -691,6 +698,7 @@ public class DietController {
         payload.put("servingDescription", food.getServingDescription());
         payload.put("servingAmountGrams", food.getServingAmountGrams());
         payload.put("servingUnit", food.getServingUnit());
+        payload.put("servings", parseServings(food.getServingsJson()));
         return payload;
     }
 
@@ -716,6 +724,7 @@ public class DietController {
         payload.put("carbs", round1(carbs));
         payload.put("fat", round1(fat));
         payload.put("favoriteFood", food.isFavorite());
+        payload.put("servings", parseServings(food.getServingsJson()));
         return payload;
     }
 
@@ -821,14 +830,24 @@ public class DietController {
     private double gramsForQuantity(DietFood food, double quantity, String unit) {
         String normalized = normalizeUnit(unit);
 
-        // "g" e "ml" são tratados como massa/volume equivalente (1 ml ≈ 1 g).
+        // Cenário A: "g" e "ml" são peso/volume livre (1 ml ≈ 1 g).
         if ("g".equals(normalized) || "ml".equals(normalized)) {
             return quantity;
         }
 
-        // "unidade(s)", "porção", "fatia(s)" e "colher(es)" convertem usando a
-        // porção informada pela FatSecret (servingAmountGrams). Ex.: 1 unidade de
-        // ovo = 50 g, em vez de assumir 1 g.
+        // Cenário B: porção específica (ex.: "1 unidade", "1 colher"). Localiza o
+        // peso em gramas da porção selecionada no array de servings persistido.
+        for (AlimentoServingDTO serving : parseServings(food.getServingsJson())) {
+            if (serving.description() != null
+                    && serving.description().trim().equalsIgnoreCase(unit.trim())) {
+                if (serving.amountGrams() != null && serving.amountGrams() > 0) {
+                    return quantity * serving.amountGrams();
+                }
+                break;
+            }
+        }
+
+        // Fallback: porção única informada pela FatSecret (servingAmountGrams).
         Double servingGrams = food.getServingAmountGrams();
         if (servingGrams != null && servingGrams > 0) {
             return quantity * servingGrams;
@@ -836,6 +855,29 @@ public class DietController {
 
         // Sem dados de porção, mantém o valor informado (fallback seguro).
         return quantity;
+    }
+
+    private String serializeServings(List<AlimentoServingDTO> servings) {
+        if (servings == null || servings.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(servings);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private List<AlimentoServingDTO> parseServings(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            AlimentoServingDTO[] arr = objectMapper.readValue(json, AlimentoServingDTO[].class);
+            return arr == null ? List.of() : Arrays.asList(arr);
+        } catch (Exception ex) {
+            return List.of();
+        }
     }
 
     public record FoodUpsertDto(
@@ -848,7 +890,8 @@ public class DietController {
                 Boolean custom,
                 String servingDescription,
                 Double servingAmountGrams,
-                String servingUnit
+                String servingUnit,
+                List<AlimentoServingDTO> servings
     ) {}
 
     public record FavoriteToggleDto(Boolean favorite) {}

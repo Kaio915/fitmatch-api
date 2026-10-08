@@ -1,5 +1,7 @@
 package fitmatch_api.dto;
 
+import java.util.List;
+
 public record AlimentoDTO(
         String name,
         double caloriesPer100g,
@@ -11,5 +13,6 @@ public record AlimentoDTO(
         String source,
         String servingDescription,
         Double servingAmountGrams,
-        String servingUnit
+        String servingUnit,
+        List<AlimentoServingDTO> servings
 ) {}

@@ -48,6 +48,9 @@ public class DietFood {
     @Column
     private String servingUnit;
 
+    @Column(columnDefinition = "TEXT")
+    private String servingsJson;
+
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
@@ -160,6 +163,14 @@ public class DietFood {
 
     public void setServingUnit(String servingUnit) {
         this.servingUnit = servingUnit;
+    }
+
+    public String getServingsJson() {
+        return servingsJson;
+    }
+
+    public void setServingsJson(String servingsJson) {
+        this.servingsJson = servingsJson;
     }
 
     public LocalDateTime getCreatedAt() {

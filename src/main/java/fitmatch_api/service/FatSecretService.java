@@ -1,6 +1,7 @@
 package fitmatch_api.service;
 
 import fitmatch_api.dto.AlimentoDTO;
+import fitmatch_api.dto.AlimentoServingDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -211,7 +212,7 @@ public class FatSecretService {
             int total = items.size();
 
             for (JsonNode item : items) {
-                AlimentoDTO dto = toAlimento(item);
+                AlimentoDTO dto = toAlimento(item, token);
                 if (dto != null) {
                     results.add(dto);
                     parsed++;
@@ -330,7 +331,7 @@ public class FatSecretService {
         return token;
     }
 
-    private AlimentoDTO toAlimento(JsonNode food) {
+    private AlimentoDTO toAlimento(JsonNode food, String token) {
         if (food == null || food.isMissingNode()) {
             return null;
         }
@@ -371,6 +372,20 @@ public class FatSecretService {
         String servingDescription = parseServingDescription(description);
         String servingUnit = parseServingUnit(description);
 
+        // Busca o array real de porções (servings) da FatSecret. Cada porção traz
+        // sua própria descrição (ex.: "1 grande"), peso em gramas e macros — usado
+        // pelo app no dropdown dinâmico e no cálculo correto de "1 unidade".
+        List<AlimentoServingDTO> servings = fetchServings(token, textOf(food.path("food_id")));
+
+        // Fallback: se a chamada food.get falhar, monta uma porção a partir do
+        // food_description para manter o dropdown funcional.
+        if (servings.isEmpty()) {
+            AlimentoServingDTO fallback = fallbackServing(servingDescription, servingGrams, servingUnit);
+            if (fallback != null) {
+                servings = List.of(fallback);
+            }
+        }
+
         return new AlimentoDTO(
                 name,
                 round1(kcal),
@@ -382,7 +397,108 @@ public class FatSecretService {
                 "FatSecret",
                 servingDescription,
                 servingGrams > 0 ? round1(servingGrams) : null,
-                servingUnit
+                servingUnit,
+                servings
+        );
+    }
+
+    private List<AlimentoServingDTO> fetchServings(String token, String foodId) {
+        if (foodId == null || foodId.isBlank() || token == null || token.isBlank()) {
+            return List.of();
+        }
+        try {
+            String url = apiUrl
+                    + "?method=food.get"
+                    + "&food_id=" + URLEncoder.encode(foodId, StandardCharsets.UTF_8)
+                    + "&format=json";
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+            headers.setBearerAuth(token);
+            HttpEntity<Void> request = new HttpEntity<>(headers);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    URI.create(url),
+                    HttpMethod.GET,
+                    request,
+                    String.class
+            );
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                return List.of();
+            }
+
+            JsonNode root = objectMapper.readTree(response.getBody());
+            JsonNode servingsNode = root.path("food").path("servings").path("serving");
+            return parseServingList(servingsNode);
+        } catch (Exception ex) {
+            log.warn("FatSecret: falha ao buscar porções do alimento {}: {}", foodId, ex.getMessage());
+            return List.of();
+        }
+    }
+
+    private List<AlimentoServingDTO> parseServingList(JsonNode servingsNode) {
+        if (servingsNode == null || servingsNode.isMissingNode() || servingsNode.isNull()) {
+            return List.of();
+        }
+        List<AlimentoServingDTO> result = new ArrayList<>();
+        if (servingsNode.isArray()) {
+            for (JsonNode serving : servingsNode) {
+                AlimentoServingDTO dto = toServing(serving);
+                if (dto != null) {
+                    result.add(dto);
+                }
+            }
+        } else {
+            AlimentoServingDTO dto = toServing(servingsNode);
+            if (dto != null) {
+                result.add(dto);
+            }
+        }
+        return result;
+    }
+
+    private AlimentoServingDTO toServing(JsonNode serving) {
+        if (serving == null || serving.isMissingNode() || serving.isNull()) {
+            return null;
+        }
+        String description = textOf(serving.path("serving_description"));
+        if (description.isBlank()) {
+            return null;
+        }
+        String unit = textOf(serving.path("metric_serving_unit"));
+        return new AlimentoServingDTO(
+                description,
+                parseDoubleOrNull(textOf(serving.path("metric_serving_amount"))),
+                unit.isBlank() ? null : unit,
+                parseDoubleOrNull(textOf(serving.path("calories"))),
+                parseDoubleOrNull(textOf(serving.path("protein"))),
+                parseDoubleOrNull(textOf(serving.path("carbohydrate"))),
+                parseDoubleOrNull(textOf(serving.path("fat")))
+        );
+    }
+
+    private Double parseDoubleOrNull(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(raw.replace(',', '.'));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private AlimentoServingDTO fallbackServing(String description, double grams, String unit) {
+        if (description == null || description.isBlank()) {
+            return null;
+        }
+        return new AlimentoServingDTO(
+                description,
+                grams > 0 ? round1(grams) : null,
+                (unit == null || unit.isBlank()) ? "g" : unit,
+                null,
+                null,
+                null,
+                null
         );
     }
 
