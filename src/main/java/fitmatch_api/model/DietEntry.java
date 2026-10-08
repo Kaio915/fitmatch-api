@@ -27,6 +27,9 @@ public class DietEntry {
     @Column(nullable = false)
     private Double quantityGrams;
 
+    @Column
+    private String unit;
+
     @Column(nullable = false)
     private LocalDate entryDate;
 
@@ -76,6 +79,14 @@ public class DietEntry {
 
     public void setQuantityGrams(Double quantityGrams) {
         this.quantityGrams = quantityGrams;
+    }
+
+    public String getUnit() {
+        return unit;
+    }
+
+    public void setUnit(String unit) {
+        this.unit = unit;
     }
 
     public LocalDate getEntryDate() {

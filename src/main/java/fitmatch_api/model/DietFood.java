@@ -39,6 +39,15 @@ public class DietFood {
     @Column
     private Boolean custom = true;
 
+    @Column(columnDefinition = "TEXT")
+    private String servingDescription;
+
+    @Column
+    private Double servingAmountGrams;
+
+    @Column
+    private String servingUnit;
+
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
@@ -127,6 +136,30 @@ public class DietFood {
 
     public void setCustom(Boolean custom) {
         this.custom = custom;
+    }
+
+    public String getServingDescription() {
+        return servingDescription;
+    }
+
+    public void setServingDescription(String servingDescription) {
+        this.servingDescription = servingDescription;
+    }
+
+    public Double getServingAmountGrams() {
+        return servingAmountGrams;
+    }
+
+    public void setServingAmountGrams(Double servingAmountGrams) {
+        this.servingAmountGrams = servingAmountGrams;
+    }
+
+    public String getServingUnit() {
+        return servingUnit;
+    }
+
+    public void setServingUnit(String servingUnit) {
+        this.servingUnit = servingUnit;
     }
 
     public LocalDateTime getCreatedAt() {

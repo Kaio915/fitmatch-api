@@ -8,5 +8,8 @@ public record AlimentoDTO(
         double fatPer100g,
         String brand,
         String category,
-        String source
+        String source,
+        String servingDescription,
+        Double servingAmountGrams,
+        String servingUnit
 ) {}

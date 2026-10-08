@@ -357,6 +357,20 @@ public class FatSecretService {
                 "Gordura[s]?\\s*:\\s*([\\d.,]+)",
                 "Fat\\s*:\\s*([\\d.,]+)");
 
+        // Normaliza os macronutrientes para a base de 100 g. A FatSecret descreve
+        // a porção no próprio "food_description" (ex.: "Per 1 ovo (50 g) - ...").
+        double servingGrams = parseServingGrams(description);
+        if (servingGrams > 0 && Math.abs(servingGrams - 100.0) > 0.0001) {
+            double scale = 100.0 / servingGrams;
+            kcal *= scale;
+            protein *= scale;
+            carbs *= scale;
+            fat *= scale;
+        }
+
+        String servingDescription = parseServingDescription(description);
+        String servingUnit = parseServingUnit(description);
+
         return new AlimentoDTO(
                 name,
                 round1(kcal),
@@ -365,8 +379,71 @@ public class FatSecretService {
                 round1(fat),
                 textOf(food.path("brand_name")),
                 textOf(food.path("food_type")),
-                "FatSecret"
+                "FatSecret",
+                servingDescription,
+                servingGrams > 0 ? round1(servingGrams) : null,
+                servingUnit
         );
+    }
+
+    private String parseServingDescription(String description) {
+        if (description == null || description.isBlank()) {
+            return "";
+        }
+        String value = description.trim();
+        if (!value.toLowerCase(Locale.ROOT).startsWith("per ")) {
+            return "";
+        }
+        int dashIndex = value.indexOf(" - ");
+        if (dashIndex > 4) {
+            return value.substring(4, dashIndex).trim();
+        }
+        return value.substring(4).trim();
+    }
+
+    private double parseServingGrams(String description) {
+        if (description == null || description.isBlank()) {
+            return 0.0;
+        }
+        // Ex.: "Per 1 ovo (50 g) - ..." ou "Per 100 g - ..."
+        Matcher parenthesized = Pattern.compile(
+                "\\(\\s*([\\d.,]+)\\s*(?:g|gramas?|ml)\\s*\\)",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+        ).matcher(description);
+        if (parenthesized.find()) {
+            return parseDecimal(parenthesized.group(1));
+        }
+        Matcher perAmount = Pattern.compile(
+                "Per\\s+([\\d.,]+)\\s*(?:g|gramas?|ml)\\b",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+        ).matcher(description);
+        if (perAmount.find()) {
+            return parseDecimal(perAmount.group(1));
+        }
+        return 0.0;
+    }
+
+    private String parseServingUnit(String description) {
+        if (description == null || description.isBlank()) {
+            return "g";
+        }
+        Matcher parenthesized = Pattern.compile(
+                "\\(\\s*[\\d.,]+\\s*(g|gramas?|ml)\\s*\\)",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+        ).matcher(description);
+        if (parenthesized.find()) {
+            String unit = parenthesized.group(1);
+            return unit.toLowerCase(Locale.ROOT).startsWith("ml") ? "ml" : "g";
+        }
+        return "g";
+    }
+
+    private double parseDecimal(String raw) {
+        try {
+            return Double.parseDouble(raw.replace(',', '.'));
+        } catch (NumberFormatException ex) {
+            return 0.0;
+        }
     }
 
     private double parseNutrient(String description, String... patterns) {

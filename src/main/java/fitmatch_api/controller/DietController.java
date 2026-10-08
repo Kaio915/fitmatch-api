@@ -97,6 +97,9 @@ public class DietController {
         food.setFatPer100g(normalizeNonNegative(dto.fatPer100g(), "Gordura"));
         food.setFavorite(Boolean.TRUE.equals(dto.favorite()));
         food.setCustom(dto.custom() == null || dto.custom());
+        food.setServingDescription(dto.servingDescription());
+        food.setServingAmountGrams(dto.servingAmountGrams());
+        food.setServingUnit(dto.servingUnit());
 
         return toFoodPayload(foodRepo.save(food));
     }
@@ -126,6 +129,9 @@ public class DietController {
         food.setCarbsPer100g(normalizeNonNegative(dto.carbsPer100g(), "Carboidratos"));
         food.setFatPer100g(normalizeNonNegative(dto.fatPer100g(), "Gordura"));
         food.setFavorite(Boolean.TRUE.equals(dto.favorite()));
+        food.setServingDescription(dto.servingDescription());
+        food.setServingAmountGrams(dto.servingAmountGrams());
+        food.setServingUnit(dto.servingUnit());
 
         return toFoodPayload(foodRepo.save(food));
     }
@@ -238,7 +244,8 @@ public class DietController {
                 continue;
             }
 
-            double factor = safe(entry.getQuantityGrams()) / 100.0;
+            double grams = gramsForQuantity(food, safe(entry.getQuantityGrams()), entry.getUnit());
+            double factor = grams / 100.0;
             double kcal = safe(food.getCaloriesPer100g()) * factor;
             double protein = safe(food.getProteinPer100g()) * factor;
             double carbs = safe(food.getCarbsPer100g()) * factor;
@@ -470,10 +477,12 @@ public class DietController {
         entry.setFoodId(food.getId());
         entry.setMealType(mealType);
         entry.setQuantityGrams(quantity);
+        entry.setUnit(normalizeUnit(dto.unit()));
         entry.setEntryDate(entryDate);
 
         DietEntry saved = entryRepo.save(entry);
-        double factor = quantity / 100.0;
+        double grams = gramsForQuantity(food, quantity, entry.getUnit());
+        double factor = grams / 100.0;
 
         return toEntryPayload(
                 saved,
@@ -551,11 +560,13 @@ public class DietController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Registro não encontrado"));
 
         double newQty = normalizePositive(dto.quantityGrams(), "Quantidade");
+        String newUnit = normalizeUnit(dto.unit());
         String scope = dto.scope() != null ? dto.scope().toUpperCase(Locale.ROOT) : "TODAY";
         double previousQty = safe(entry.getQuantityGrams());
 
         // Atualiza a entrada específica
         entry.setQuantityGrams(newQty);
+        entry.setUnit(newUnit);
         entryRepo.save(entry);
 
         // Atualiza outras entradas com o mesmo alimento e refeição conforme escopo
@@ -567,6 +578,7 @@ public class DietController {
                 if (!e.getId().equals(entry.getId())
                         && Math.abs(safe(e.getQuantityGrams()) - previousQty) < 0.0001) {
                     e.setQuantityGrams(newQty);
+                    e.setUnit(newUnit);
                     entryRepo.save(e);
                 }
             }
@@ -577,6 +589,7 @@ public class DietController {
             for (DietEntry e : all) {
                 if (!e.getId().equals(entry.getId())) {
                     e.setQuantityGrams(newQty);
+                    e.setUnit(newUnit);
                     entryRepo.save(e);
                 }
             }
@@ -585,7 +598,8 @@ public class DietController {
         DietFood food = foodRepo.findByIdAndUserId(entry.getFoodId(), userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alimento não encontrado"));
 
-        double factor = newQty / 100.0;
+        double grams = gramsForQuantity(food, newQty, newUnit);
+        double factor = grams / 100.0;
         return toEntryPayload(
                 entry,
                 food,
@@ -674,6 +688,9 @@ public class DietController {
         payload.put("fatPer100g", round1(safe(food.getFatPer100g())));
         payload.put("favorite", food.isFavorite());
         payload.put("custom", food.isCustom());
+        payload.put("servingDescription", food.getServingDescription());
+        payload.put("servingAmountGrams", food.getServingAmountGrams());
+        payload.put("servingUnit", food.getServingUnit());
         return payload;
     }
 
@@ -693,6 +710,7 @@ public class DietController {
         payload.put("mealType", entry.getMealType());
         payload.put("date", entry.getEntryDate().toString());
         payload.put("quantityGrams", round1(safe(entry.getQuantityGrams())));
+        payload.put("unit", entry.getUnit() == null || entry.getUnit().isBlank() ? "g" : entry.getUnit());
         payload.put("calories", round1(calories));
         payload.put("protein", round1(protein));
         payload.put("carbs", round1(carbs));
@@ -793,6 +811,33 @@ public class DietController {
         return Math.round(value * 10.0) / 10.0;
     }
 
+    private String normalizeUnit(String unit) {
+        if (unit == null || unit.isBlank()) {
+            return "g";
+        }
+        return unit.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private double gramsForQuantity(DietFood food, double quantity, String unit) {
+        String normalized = normalizeUnit(unit);
+
+        // "g" e "ml" são tratados como massa/volume equivalente (1 ml ≈ 1 g).
+        if ("g".equals(normalized) || "ml".equals(normalized)) {
+            return quantity;
+        }
+
+        // "unidade(s)", "porção", "fatia(s)" e "colher(es)" convertem usando a
+        // porção informada pela FatSecret (servingAmountGrams). Ex.: 1 unidade de
+        // ovo = 50 g, em vez de assumir 1 g.
+        Double servingGrams = food.getServingAmountGrams();
+        if (servingGrams != null && servingGrams > 0) {
+            return quantity * servingGrams;
+        }
+
+        // Sem dados de porção, mantém o valor informado (fallback seguro).
+        return quantity;
+    }
+
     public record FoodUpsertDto(
             String name,
             Double caloriesPer100g,
@@ -800,20 +845,30 @@ public class DietController {
             Double carbsPer100g,
             Double fatPer100g,
                 Boolean favorite,
-                Boolean custom
+                Boolean custom,
+                String servingDescription,
+                Double servingAmountGrams,
+                String servingUnit
     ) {}
 
     public record FavoriteToggleDto(Boolean favorite) {}
 
     public record GoalUpsertDto(Double basalKcal, Double targetKcal) {}
 
-    public record EntryCreateDto(Long foodId, String mealType, Double quantityGrams, String date) {}
+    public record EntryCreateDto(
+            Long foodId,
+            String mealType,
+            Double quantityGrams,
+            String date,
+            String unit
+    ) {}
 
     public record EntryMealTypeUpdateDto(String oldMealType, String newMealType, String date) {}
 
     public record EntryQuantityUpdateDto(
             Double quantityGrams,
-            String scope
+            String scope,
+            String unit
     ) {}
 
     public record SavedMealItemDto(
