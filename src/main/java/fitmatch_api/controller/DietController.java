@@ -855,20 +855,25 @@ public class DietController {
     }
 
     /**
-     * Peso da porção padrão vindo da API (FatSecret metric_serving_amount /
-     * servingAmountGrams, ou a base da TACO). Fallback seguro de 100 g.
+     * Peso da porção padrão vindo da API.
+     *
+     * Prioriza o array "servings" (peso real da unidade/porção, ex.: "1 ovo" =
+     * 50 g), pois servingAmountGrams costuma ser a base "100 g" da descrição.
+     * Fallback seguro de 50 g (ex.: 1 ovo ≈ 50 g).
      */
     private double defaultServingWeightGrams(DietFood food) {
-        Double servingGrams = food.getServingAmountGrams();
-        if (servingGrams != null && servingGrams > 0) {
-            return servingGrams;
-        }
         for (AlimentoServingDTO serving : parseServings(food.getServingsJson())) {
             if (serving.amountGrams() != null && serving.amountGrams() > 0) {
                 return serving.amountGrams();
             }
         }
-        return 100.0;
+
+        Double servingGrams = food.getServingAmountGrams();
+        if (servingGrams != null && servingGrams > 0) {
+            return servingGrams;
+        }
+
+        return 50.0;
     }
 
     /**
