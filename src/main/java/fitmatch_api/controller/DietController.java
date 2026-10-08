@@ -828,33 +828,68 @@ public class DietController {
     }
 
     private double gramsForQuantity(DietFood food, double quantity, String unit) {
+        return quantity * weightPerUnitInGrams(food, unit);
+    }
+
+    /**
+     * "Unidade Lógica": peso (em gramas) de 1 unidade da opção selecionada no
+     * dropdown estático. Separa a "Unidade Visual" (ex.: "colher de sopa",
+     * "unidade(s)") do peso real usado na matemática.
+     */
+    private double weightPerUnitInGrams(DietFood food, String unit) {
         String normalized = normalizeUnit(unit);
-
-        // Cenário A: "g" e "ml" são peso/volume livre (1 ml ≈ 1 g).
-        if ("g".equals(normalized) || "ml".equals(normalized)) {
-            return quantity;
+        switch (normalized) {
+            case "g":
+            case "ml":
+                return 1.0;
+            case "colher de sopa":
+                return 15.0; // padrão nutricional
+            case "unidade(s)":
+            case "porção":
+            case "fatia(s)":
+                return defaultServingWeightGrams(food);
+            default:
+                // Unidade legada (descrição dinâmica antiga, ex.: "1 unidade").
+                return legacyServingWeightGrams(food, unit);
         }
+    }
 
-        // Cenário B: porção específica (ex.: "1 unidade", "1 colher"). Localiza o
-        // peso em gramas da porção selecionada no array de servings persistido.
+    /**
+     * Peso da porção padrão vindo da API (FatSecret metric_serving_amount /
+     * servingAmountGrams, ou a base da TACO). Fallback seguro de 100 g.
+     */
+    private double defaultServingWeightGrams(DietFood food) {
+        Double servingGrams = food.getServingAmountGrams();
+        if (servingGrams != null && servingGrams > 0) {
+            return servingGrams;
+        }
+        for (AlimentoServingDTO serving : parseServings(food.getServingsJson())) {
+            if (serving.amountGrams() != null && serving.amountGrams() > 0) {
+                return serving.amountGrams();
+            }
+        }
+        return 100.0;
+    }
+
+    /**
+     * Mantém o cálculo correto para entradas antigas salvas com a descrição
+     * dinâmica da porção no campo unit.
+     */
+    private double legacyServingWeightGrams(DietFood food, String unit) {
         for (AlimentoServingDTO serving : parseServings(food.getServingsJson())) {
             if (serving.description() != null
                     && serving.description().trim().equalsIgnoreCase(unit.trim())) {
                 if (serving.amountGrams() != null && serving.amountGrams() > 0) {
-                    return quantity * serving.amountGrams();
+                    return serving.amountGrams();
                 }
                 break;
             }
         }
-
-        // Fallback: porção única informada pela FatSecret (servingAmountGrams).
         Double servingGrams = food.getServingAmountGrams();
         if (servingGrams != null && servingGrams > 0) {
-            return quantity * servingGrams;
+            return servingGrams;
         }
-
-        // Sem dados de porção, mantém o valor informado (fallback seguro).
-        return quantity;
+        return 1.0; // comportamento legado: mantém o valor informado
     }
 
     private String serializeServings(List<AlimentoServingDTO> servings) {
