@@ -114,6 +114,33 @@ public class FatSecretService {
             Map.entry("noodles", "Macarrão")
     );
 
+    private static final Map<String, String> SERVING_EN_TO_PT = Map.ofEntries(
+            Map.entry("NS as to size", "tamanho não especificado"),
+            Map.entry("extra large", "extra grande"),
+            Map.entry("tablespoon", "colher de sopa"),
+            Map.entry("tablespoons", "colheres de sopa"),
+            Map.entry("teaspoon", "colher de chá"),
+            Map.entry("teaspoons", "colheres de chá"),
+            Map.entry("large", "grande"),
+            Map.entry("medium", "médio"),
+            Map.entry("small", "pequeno"),
+            Map.entry("tbsp", "colher de sopa"),
+            Map.entry("tsp", "colher de chá"),
+            Map.entry("cup", "xícara"),
+            Map.entry("cups", "xícaras"),
+            Map.entry("slice", "fatia"),
+            Map.entry("slices", "fatias"),
+            Map.entry("piece", "pedaço"),
+            Map.entry("pieces", "pedaços"),
+            Map.entry("serving", "porção"),
+            Map.entry("servings", "porções"),
+            Map.entry("oz", "onças (oz)"),
+            Map.entry("ounce", "onça"),
+            Map.entry("ounces", "onças"),
+            Map.entry("egg", "ovo"),
+            Map.entry("eggs", "ovos")
+    );
+
             private static final Map<String, String> PT_TO_EN_PRIORITY = Map.ofEntries(
                 Map.entry("milho", "corn"),
                 Map.entry("carne", "meat"),
@@ -237,6 +264,8 @@ public class FatSecretService {
         String url = apiUrl
                 + "?method=foods.search"
                 + "&search_expression=" + encodedTerm
+                + "&region=BR"
+                + "&language=pt"
                 + "&format=json"
                 + "&page_number=0"
                 + "&max_results=20";
@@ -395,7 +424,7 @@ public class FatSecretService {
                 textOf(food.path("brand_name")),
                 textOf(food.path("food_type")),
                 "FatSecret",
-                servingDescription,
+                translateServingDescription(servingDescription),
                 servingGrams > 0 ? round1(servingGrams) : null,
                 servingUnit,
                 servings
@@ -410,6 +439,8 @@ public class FatSecretService {
             String url = apiUrl
                     + "?method=food.get"
                     + "&food_id=" + URLEncoder.encode(foodId, StandardCharsets.UTF_8)
+                    + "&region=BR"
+                    + "&language=pt"
                     + "&format=json";
 
             HttpHeaders headers = new HttpHeaders();
@@ -460,7 +491,7 @@ public class FatSecretService {
         if (serving == null || serving.isMissingNode() || serving.isNull()) {
             return null;
         }
-        String description = textOf(serving.path("serving_description"));
+        String description = translateServingDescription(textOf(serving.path("serving_description")));
         if (description.isBlank()) {
             return null;
         }
@@ -492,7 +523,7 @@ public class FatSecretService {
             return null;
         }
         return new AlimentoServingDTO(
-                description,
+                translateServingDescription(description),
                 grams > 0 ? round1(grams) : null,
                 (unit == null || unit.isBlank()) ? "g" : unit,
                 null,
@@ -507,7 +538,8 @@ public class FatSecretService {
             return "";
         }
         String value = description.trim();
-        if (!value.toLowerCase(Locale.ROOT).startsWith("per ")) {
+        String lower = value.toLowerCase(Locale.ROOT);
+        if (!lower.startsWith("per ") && !lower.startsWith("por ")) {
             return "";
         }
         int dashIndex = value.indexOf(" - ");
@@ -530,7 +562,7 @@ public class FatSecretService {
             return parseDecimal(parenthesized.group(1));
         }
         Matcher perAmount = Pattern.compile(
-                "Per\\s+([\\d.,]+)\\s*(?:g|gramas?|ml)\\b",
+                "(?:Per|Por)\\s+([\\d.,]+)\\s*(?:g|grams?|gramas?|ml)\\b",
                 Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
         ).matcher(description);
         if (perAmount.find()) {
@@ -586,6 +618,29 @@ public class FatSecretService {
         }
         String result = name;
         for (Map.Entry<String, String> entry : EN_TO_PT.entrySet()) {
+            result = result.replaceAll(
+                    "(?i)\\b" + Pattern.quote(entry.getKey()) + "\\b",
+                    Matcher.quoteReplacement(entry.getValue())
+            );
+        }
+        return result;
+    }
+
+    /**
+     * Traduz termos comuns de unidade que a FatSecret retorna em inglês no
+     * {@code serving_description} (ex.: "1 large", "1 medium", "1 egg, NS as to
+     * size") mesmo quando {@code language=pt} está configurado. Aplicado antes de
+     * persistir/exibir as porções.
+     */
+    private String translateServingDescription(String description) {
+        if (description == null || description.isBlank()) {
+            return description;
+        }
+        List<Map.Entry<String, String>> entries = new ArrayList<>(SERVING_EN_TO_PT.entrySet());
+        entries.sort((a, b) -> Integer.compare(b.getKey().length(), a.getKey().length()));
+
+        String result = description;
+        for (Map.Entry<String, String> entry : entries) {
             result = result.replaceAll(
                     "(?i)\\b" + Pattern.quote(entry.getKey()) + "\\b",
                     Matcher.quoteReplacement(entry.getValue())
