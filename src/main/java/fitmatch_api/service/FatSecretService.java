@@ -126,14 +126,30 @@ public class FatSecretService {
             Map.entry("small", "pequeno"),
             Map.entry("tbsp", "colher de sopa"),
             Map.entry("tsp", "colher de chá"),
-            Map.entry("cup", "xícara"),
-            Map.entry("cups", "xícaras"),
+            Map.entry("cup", "copo"),
+            Map.entry("cups", "copos"),
+            Map.entry("glass", "copo"),
+            Map.entry("glasses", "copos"),
             Map.entry("slice", "fatia"),
             Map.entry("slices", "fatias"),
             Map.entry("piece", "pedaço"),
             Map.entry("pieces", "pedaços"),
             Map.entry("serving", "porção"),
             Map.entry("servings", "porções"),
+            Map.entry("bottle", "garrafa"),
+            Map.entry("bottles", "garrafas"),
+            Map.entry("can", "lata"),
+            Map.entry("cans", "latas"),
+            Map.entry("jar", "pote"),
+            Map.entry("jars", "potes"),
+            Map.entry("pack", "embalagem"),
+            Map.entry("packs", "embalagens"),
+            Map.entry("bag", "pacote"),
+            Map.entry("bags", "pacotes"),
+            Map.entry("bar", "barra"),
+            Map.entry("bars", "barras"),
+            Map.entry("container", "recipiente"),
+            Map.entry("containers", "recipientes"),
             Map.entry("oz", "onças (oz)"),
             Map.entry("ounce", "onça"),
             Map.entry("ounces", "onças"),
@@ -689,7 +705,10 @@ public class FatSecretService {
                     Matcher.quoteReplacement(entry.getValue())
             );
         }
-        return result;
+        // Normaliza espaços/quebras de linha para manter a descrição idêntica
+        // ao rótulo exibido e persistido pelo app Flutter (garantindo o
+        // casamento por descrição no cálculo de peso da porção).
+        return result.replaceAll("\\s+", " ").trim();
     }
 
     private boolean isEnglishFoodName(String name) {
