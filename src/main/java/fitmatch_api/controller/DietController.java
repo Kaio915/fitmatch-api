@@ -106,6 +106,7 @@ public class DietController {
         food.setServingAmountGrams(dto.servingAmountGrams());
         food.setServingUnit(dto.servingUnit());
         food.setServingsJson(serializeServings(dto.servings()));
+        food.setDefaultServingGrams(dto.defaultServingGrams());
 
         return toFoodPayload(foodRepo.save(food));
     }
@@ -139,6 +140,7 @@ public class DietController {
         food.setServingAmountGrams(dto.servingAmountGrams());
         food.setServingUnit(dto.servingUnit());
         food.setServingsJson(serializeServings(dto.servings()));
+        food.setDefaultServingGrams(dto.defaultServingGrams());
 
         return toFoodPayload(foodRepo.save(food));
     }
@@ -699,6 +701,7 @@ public class DietController {
         payload.put("servingAmountGrams", food.getServingAmountGrams());
         payload.put("servingUnit", food.getServingUnit());
         payload.put("servings", parseServings(food.getServingsJson()));
+        payload.put("defaultServingGrams", food.getDefaultServingGrams());
         return payload;
     }
 
@@ -855,17 +858,16 @@ public class DietController {
     }
 
     /**
-     * Peso da porção padrão vindo da API.
+     * Peso (em gramas) da porção padrão oficial do alimento, vindo da API/base.
      *
-     * Prioriza o array "servings" (peso real da unidade/porção, ex.: "1 ovo" =
-     * 50 g), pois servingAmountGrams costuma ser a base "100 g" da descrição.
-     * Fallback seguro de 50 g (ex.: 1 ovo ≈ 50 g).
+     * Prioriza o campo {@code defaultServingGrams} (peso oficial da porção),
+     * depois {@code servingAmountGrams} e, por fim, o peso da primeira porção
+     * válida do array {@code servings}. Fallback de segurança de 100 g.
      */
     private double defaultServingWeightGrams(DietFood food) {
-        for (AlimentoServingDTO serving : parseServings(food.getServingsJson())) {
-            if (serving.amountGrams() != null && serving.amountGrams() > 0) {
-                return serving.amountGrams();
-            }
+        Double defaultGrams = food.getDefaultServingGrams();
+        if (defaultGrams != null && defaultGrams > 0) {
+            return defaultGrams;
         }
 
         Double servingGrams = food.getServingAmountGrams();
@@ -873,7 +875,20 @@ public class DietController {
             return servingGrams;
         }
 
-        return 50.0;
+        for (AlimentoServingDTO serving : parseServings(food.getServingsJson())) {
+            if (Boolean.TRUE.equals(serving.isDefault())
+                    && serving.amountGrams() != null
+                    && serving.amountGrams() > 0) {
+                return serving.amountGrams();
+            }
+        }
+        for (AlimentoServingDTO serving : parseServings(food.getServingsJson())) {
+            if (serving.amountGrams() != null && serving.amountGrams() > 0) {
+                return serving.amountGrams();
+            }
+        }
+
+        return 100.0;
     }
 
     /**
@@ -889,6 +904,10 @@ public class DietController {
                 }
                 break;
             }
+        }
+        Double defaultGrams = food.getDefaultServingGrams();
+        if (defaultGrams != null && defaultGrams > 0) {
+            return defaultGrams;
         }
         Double servingGrams = food.getServingAmountGrams();
         if (servingGrams != null && servingGrams > 0) {
@@ -931,7 +950,8 @@ public class DietController {
                 String servingDescription,
                 Double servingAmountGrams,
                 String servingUnit,
-                List<AlimentoServingDTO> servings
+                List<AlimentoServingDTO> servings,
+                Double defaultServingGrams
     ) {}
 
     public record FavoriteToggleDto(Boolean favorite) {}

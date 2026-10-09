@@ -14,5 +14,6 @@ public record AlimentoDTO(
         String servingDescription,
         Double servingAmountGrams,
         String servingUnit,
-        List<AlimentoServingDTO> servings
+        List<AlimentoServingDTO> servings,
+        Double defaultServingGrams
 ) {}

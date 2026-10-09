@@ -49,6 +49,9 @@ public class FoodSearchService {
     }
 
     private AlimentoDTO toAlimentoDTO(TacoFood food) {
+        // A TACO descreve a composição por 100 g (base_qty). Usamos esse valor
+        // como o "peso da porção padrão" oficial do alimento.
+        double defaultServingGrams = val(food.getBaseQty()) > 0 ? val(food.getBaseQty()) : 100.0;
         return new AlimentoDTO(
                 food.getDescription(),
                 round1(val(food.getCalories())),
@@ -59,9 +62,10 @@ public class FoodSearchService {
                 null,
                 "TACO",
                 "100 g",
-                100.0,
+                defaultServingGrams,
                 "g",
-                List.of()
+                List.of(),
+                round1(defaultServingGrams)
         );
     }
 

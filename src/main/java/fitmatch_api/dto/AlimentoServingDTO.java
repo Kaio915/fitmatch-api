@@ -11,5 +11,6 @@ public record AlimentoServingDTO(
         Double calories,
         Double protein,
         Double carbs,
-        Double fat
+        Double fat,
+        Boolean isDefault
 ) {}

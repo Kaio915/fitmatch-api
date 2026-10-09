@@ -51,6 +51,9 @@ public class DietFood {
     @Column(columnDefinition = "TEXT")
     private String servingsJson;
 
+    @Column
+    private Double defaultServingGrams;
+
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
@@ -171,6 +174,14 @@ public class DietFood {
 
     public void setServingsJson(String servingsJson) {
         this.servingsJson = servingsJson;
+    }
+
+    public Double getDefaultServingGrams() {
+        return defaultServingGrams;
+    }
+
+    public void setDefaultServingGrams(Double defaultServingGrams) {
+        this.defaultServingGrams = defaultServingGrams;
     }
 
     public LocalDateTime getCreatedAt() {

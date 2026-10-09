@@ -415,6 +415,8 @@ public class FatSecretService {
             }
         }
 
+        Double defaultServingGrams = resolveDefaultServingGrams(servings, servingGrams);
+
         return new AlimentoDTO(
                 name,
                 round1(kcal),
@@ -427,8 +429,39 @@ public class FatSecretService {
                 translateServingDescription(servingDescription),
                 servingGrams > 0 ? round1(servingGrams) : null,
                 servingUnit,
-                servings
+                servings,
+                defaultServingGrams
         );
+    }
+
+    /**
+     * Peso (em gramas) da porção padrão do alimento. É o valor usado pelo app
+     * como "peso unitário oficial" para as unidades do tipo "unidade(s)",
+     * "porção" e "fatia(s)".
+     *
+     * Prioridade:
+     * 1. Porção marcada como padrão pela FatSecret ({@code is_default}).
+     * 2. Peso da porção descrito no {@code food_description} (consistente com a
+     *    normalização dos macros para 100 g).
+     * 3. Primeira porção com peso válido no array {@code servings}.
+     */
+    private Double resolveDefaultServingGrams(List<AlimentoServingDTO> servings, double servingGramsFromDescription) {
+        for (AlimentoServingDTO serving : servings) {
+            if (Boolean.TRUE.equals(serving.isDefault())
+                    && serving.amountGrams() != null
+                    && serving.amountGrams() > 0) {
+                return round1(serving.amountGrams());
+            }
+        }
+        if (servingGramsFromDescription > 0) {
+            return round1(servingGramsFromDescription);
+        }
+        for (AlimentoServingDTO serving : servings) {
+            if (serving.amountGrams() != null && serving.amountGrams() > 0) {
+                return round1(serving.amountGrams());
+            }
+        }
+        return null;
     }
 
     private List<AlimentoServingDTO> fetchServings(String token, String foodId) {
@@ -503,8 +536,17 @@ public class FatSecretService {
                 parseDoubleOrNull(textOf(serving.path("calories"))),
                 parseDoubleOrNull(textOf(serving.path("protein"))),
                 parseDoubleOrNull(textOf(serving.path("carbohydrate"))),
-                parseDoubleOrNull(textOf(serving.path("fat")))
+                parseDoubleOrNull(textOf(serving.path("fat"))),
+                parseIsDefault(textOf(serving.path("is_default")))
         );
+    }
+
+    private Boolean parseIsDefault(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String value = raw.trim();
+        return "1".equals(value) || "true".equalsIgnoreCase(value);
     }
 
     private Double parseDoubleOrNull(String raw) {
@@ -526,6 +568,7 @@ public class FatSecretService {
                 translateServingDescription(description),
                 grams > 0 ? round1(grams) : null,
                 (unit == null || unit.isBlank()) ? "g" : unit,
+                null,
                 null,
                 null,
                 null,
