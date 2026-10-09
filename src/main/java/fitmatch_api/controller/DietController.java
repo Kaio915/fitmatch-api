@@ -835,12 +835,37 @@ public class DietController {
     }
 
     /**
+     * Extrai o volume em ml de uma unidade de recipiente customizada, codificada
+     * como "recipiente|&lt;tipo&gt;|&lt;volumeMl&gt;" (ex.: "recipiente|copo|200").
+     * Quando o volume não pode ser lido, retorna 1.0 (1 recipiente = 1 g).
+     */
+    private double containerVolumeMl(String normalizedUnit) {
+        String[] parts = normalizedUnit.split("\\|");
+        if (parts.length >= 3) {
+            try {
+                double ml = Double.parseDouble(parts[2].replace(',', '.'));
+                if (ml > 0) {
+                    return ml;
+                }
+            } catch (NumberFormatException ignored) {
+                // fallback para o retorno seguro abaixo
+            }
+        }
+        return 1.0;
+    }
+
+    /**
      * "Unidade Lógica": peso (em gramas) de 1 unidade da opção selecionada no
      * dropdown estático. Separa a "Unidade Visual" (ex.: "colher de sopa",
      * "unidade(s)") do peso real usado na matemática.
      */
     private double weightPerUnitInGrams(DietFood food, String unit) {
         String normalized = normalizeUnit(unit);
+        if (normalized.startsWith("recipiente|")) {
+            // Recipiente customizado (copo/caixinha/garrafinha): o peso
+            // unitário é o volume em ml informado (1 ml ≈ 1 g para líquidos).
+            return containerVolumeMl(normalized);
+        }
         switch (normalized) {
             case "g":
             case "ml":
