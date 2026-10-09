@@ -848,9 +848,12 @@ public class DietController {
             case "colher de sopa":
                 return 15.0; // padrão nutricional
             case "unidade(s)":
-            case "porção":
             case "fatia(s)":
-                return defaultServingWeightGrams(food);
+                return defaultServingWeightGrams(food, normalized);
+            case "porção":
+                // Opção removida do dropdown, mas mantida por compatibilidade
+                // com entradas antigas salvas com a unidade "porção".
+                return defaultServingWeightGrams(food, "porção");
             default:
                 // Unidade legada (descrição dinâmica antiga, ex.: "1 unidade").
                 return legacyServingWeightGrams(food, unit);
@@ -860,11 +863,13 @@ public class DietController {
     /**
      * Peso (em gramas) da porção padrão oficial do alimento, vindo da API/base.
      *
-     * Prioriza o campo {@code defaultServingGrams} (peso oficial da porção),
-     * depois {@code servingAmountGrams} e, por fim, o peso da primeira porção
-     * válida do array {@code servings}. Fallback de segurança de 50 g (≈ 1 unidade).
+     * Prioriza rigorosamente o campo {@code defaultServingGrams} (peso oficial
+     * da porção), depois {@code servingAmountGrams} e, por fim, o peso da
+     * primeira porção válida do array {@code servings}. Quando a base não
+     * informa nenhum peso, aplica um fallback inteligente por nome de alimento
+     * e unidade ({@link #fallbackServingWeightGrams}).
      */
-    private double defaultServingWeightGrams(DietFood food) {
+    private double defaultServingWeightGrams(DietFood food, String unit) {
         Double defaultGrams = food.getDefaultServingGrams();
         if (defaultGrams != null && defaultGrams > 0) {
             return defaultGrams;
@@ -888,7 +893,57 @@ public class DietController {
             }
         }
 
+        return fallbackServingWeightGrams(food.getName(), unit);
+    }
+
+    /**
+     * Fallback inteligente baseado no nome do alimento, aplicado apenas quando
+     * a API/base não informa o peso oficial da porção ({@code null}).
+     *
+     * Garante que "fatia(s)" e "unidade(s)" nunca fiquem com o mesmo peso
+     * genérico para alimentos diferentes:
+     * <ul>
+     *   <li>fatia(s): bolo/torta = 60 g, pão/queijo = 25 g, demais = 30 g.</li>
+     *   <li>unidade(s): ovo = 50 g, demais = 100 g.</li>
+     *   <li>porção (legada) e outros: 50 g.</li>
+     * </ul>
+     */
+    private double fallbackServingWeightGrams(String foodName, String unit) {
+        String name = normalizeFoodName(foodName);
+        if ("fatia(s)".equals(unit)) {
+            if (containsFoodKeyword(name, "bolo", "torta")) {
+                return 60.0;
+            }
+            if (containsFoodKeyword(name, "pao", "paes", "queijo")) {
+                return 25.0;
+            }
+            return 30.0;
+        }
+        if ("unidade(s)".equals(unit)) {
+            if (containsFoodKeyword(name, "ovo", "ovos")) {
+                return 50.0;
+            }
+            return 100.0;
+        }
         return 50.0;
+    }
+
+    private String normalizeFoodName(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        return java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(Locale.ROOT);
+    }
+
+    private boolean containsFoodKeyword(String normalizedName, String... keywords) {
+        for (String keyword : keywords) {
+            if (normalizedName.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
