@@ -862,7 +862,7 @@ public class DietController {
      *
      * Prioriza o campo {@code defaultServingGrams} (peso oficial da porção),
      * depois {@code servingAmountGrams} e, por fim, o peso da primeira porção
-     * válida do array {@code servings}. Fallback de segurança de 100 g.
+     * válida do array {@code servings}. Fallback de segurança de 50 g (≈ 1 unidade).
      */
     private double defaultServingWeightGrams(DietFood food) {
         Double defaultGrams = food.getDefaultServingGrams();
@@ -888,7 +888,7 @@ public class DietController {
             }
         }
 
-        return 100.0;
+        return 50.0;
     }
 
     /**
