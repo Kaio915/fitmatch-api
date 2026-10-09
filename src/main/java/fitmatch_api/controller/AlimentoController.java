@@ -1,7 +1,7 @@
 package fitmatch_api.controller;
 
 import fitmatch_api.dto.AlimentoDTO;
-import fitmatch_api.service.FatSecretService;
+import fitmatch_api.service.FoodSearchService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -11,10 +11,10 @@ import java.util.List;
 @RequestMapping("/api/alimentos")
 public class AlimentoController {
 
-    private final FatSecretService fatSecretService;
+    private final FoodSearchService foodSearchService;
 
-    public AlimentoController(FatSecretService fatSecretService) {
-        this.fatSecretService = fatSecretService;
+    public AlimentoController(FoodSearchService foodSearchService) {
+        this.foodSearchService = foodSearchService;
     }
 
     @GetMapping("/buscar")
@@ -24,6 +24,6 @@ public class AlimentoController {
         if (termo == null || termo.trim().length() < 2) {
             return ResponseEntity.ok(List.of());
         }
-        return ResponseEntity.ok(fatSecretService.searchFoods(termo));
+        return ResponseEntity.ok(foodSearchService.search(termo));
     }
 }

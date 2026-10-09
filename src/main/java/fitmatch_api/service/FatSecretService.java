@@ -423,7 +423,7 @@ public class FatSecretService {
                 round1(fat),
                 textOf(food.path("brand_name")),
                 textOf(food.path("food_type")),
-                "FatSecret",
+                "FATSECRET",
                 translateServingDescription(servingDescription),
                 servingGrams > 0 ? round1(servingGrams) : null,
                 servingUnit,
