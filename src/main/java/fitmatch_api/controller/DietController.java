@@ -858,51 +858,48 @@ public class DietController {
 
     /**
      * "Unidade Lógica": peso (em gramas) de 1 unidade da opção selecionada no
-     * dropdown estático. Separa a "Unidade Visual" (ex.: "colher de sopa",
-     * "unidade(s)") do peso real usado na matemática.
+     * dropdown dinâmico. Separa a "Unidade Visual" (ex.: "1 colher de sopa",
+     * "1 concha", "100 g") do peso real usado na matemática.
+     *
+     * As unidades "g" e "ml" possuem multiplicador 1:1. As porções oficiais
+     * (FatSecret/TACO) chegam codificadas como "porcao|<descricao>|<pesoGrams>"
+     * e o peso é lido diretamente do valor embutido — sem chute.
      */
     private double weightPerUnitInGrams(DietFood food, String unit) {
         String normalized = normalizeUnit(unit);
-        if (normalized.startsWith("recipiente|")) {
-            // Recipiente customizado (copo/caixinha/garrafinha/lata): o peso
-            // unitário é o volume em ml informado (1 ml ≈ 1 g para líquidos).
+        if (normalized.startsWith("recipiente|")
+                || normalized.startsWith("medida|")
+                || normalized.startsWith("porcao|")) {
+            // Unidade codificada com o volume/peso real embutido:
+            // "recipiente|copo|200" (ml), "medida|concha|130" (g) ou
+            // "porcao|1 colher de sopa|15" (g).
             return encodedAmountGrams(normalized);
         }
-        if (normalized.startsWith("medida|")) {
-            // Medida caseira sólida codificada como "medida|<token>|<pesoGrams>"
-            // (ex.: "medida|concha|130"). O peso unitário é o valor embutido,
-            // já resolvido pelo frontend (peso fixo ou peso oficial da porção).
-            return encodedAmountGrams(normalized);
+        if ("g".equals(normalized) || "ml".equals(normalized)) {
+            return 1.0;
         }
-        switch (normalized) {
-            case "g":
-            case "ml":
-                return 1.0;
-            case "colher de sopa":
-                return 15.0; // padrão nutricional
-            case "unidade(s)":
-            case "fatia(s)":
-                return defaultServingWeightGrams(food, normalized);
-            case "porção":
-                // Opção removida do dropdown, mas mantida por compatibilidade
-                // com entradas antigas salvas com a unidade "porção".
-                return defaultServingWeightGrams(food, "porção");
-            default:
-                // Unidade legada (descrição dinâmica antiga, ex.: "1 unidade").
-                return legacyServingWeightGrams(food, unit);
+        // Unidade legada (descrição dinâmica antiga, ex.: "1 unidade"): casa com
+        // a descrição de uma porção real cadastrada ou usa o peso oficial padrão.
+        for (AlimentoServingDTO serving : parseServings(food.getServingsJson())) {
+            if (serving.description() != null
+                    && serving.description().trim().equalsIgnoreCase(unit.trim())
+                    && serving.amountGrams() != null
+                    && serving.amountGrams() > 0) {
+                return serving.amountGrams();
+            }
         }
+        return officialDefaultServingGrams(food);
     }
 
     /**
      * Peso (em gramas) da porção padrão oficial do alimento, vindo da API/base.
      *
      * Prioriza rigorosamente o campo {@code defaultServingGrams} (peso oficial
-     * da porção), depois {@code servingAmountGrams} e, por fim, o peso da
-     * primeira porção válida do array {@code servings}. Quando a base não
-     * informa nenhum peso, aplica um fallback inteligente por nome de alimento
-     * e unidade ({@link #fallbackServingWeightGrams}).
+     * da porção), depois {@code servingAmountGrams} e, por fim, a porção marcada
+     * como padrão ou a primeira porção válida do array {@code servings}. Quando a
+     * base não informa nenhum peso, retorna 1.0 (comportamento neutro, sem chute).
      */
-    private double defaultServingWeightGrams(DietFood food, String unit) {
+    private double officialDefaultServingGrams(DietFood food) {
         Double defaultGrams = food.getDefaultServingGrams();
         if (defaultGrams != null && defaultGrams > 0) {
             return defaultGrams;
@@ -926,83 +923,10 @@ public class DietController {
             }
         }
 
-        return fallbackServingWeightGrams(food.getName(), unit);
+        return 1.0;
     }
 
-    /**
-     * Fallback inteligente baseado no nome do alimento, aplicado apenas quando
-     * a API/base não informa o peso oficial da porção ({@code null}).
-     *
-     * Garante que "fatia(s)" e "unidade(s)" nunca fiquem com o mesmo peso
-     * genérico para alimentos diferentes:
-     * <ul>
-     *   <li>fatia(s): bolo/torta = 60 g, pão/queijo = 25 g, demais = 30 g.</li>
-     *   <li>unidade(s): ovo = 50 g, demais = 100 g.</li>
-     *   <li>porção (legada) e outros: 50 g.</li>
-     * </ul>
-     */
-    private double fallbackServingWeightGrams(String foodName, String unit) {
-        String name = normalizeFoodName(foodName);
-        if ("fatia(s)".equals(unit)) {
-            if (containsFoodKeyword(name, "bolo", "torta")) {
-                return 60.0;
-            }
-            if (containsFoodKeyword(name, "pao", "paes", "queijo")) {
-                return 25.0;
-            }
-            return 30.0;
-        }
-        if ("unidade(s)".equals(unit)) {
-            if (containsFoodKeyword(name, "ovo", "ovos")) {
-                return 50.0;
-            }
-            return 100.0;
-        }
-        return 50.0;
-    }
 
-    private String normalizeFoodName(String raw) {
-        if (raw == null) {
-            return "";
-        }
-        return java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "")
-                .toLowerCase(Locale.ROOT);
-    }
-
-    private boolean containsFoodKeyword(String normalizedName, String... keywords) {
-        for (String keyword : keywords) {
-            if (normalizedName.contains(keyword)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Mantém o cálculo correto para entradas antigas salvas com a descrição
-     * dinâmica da porção no campo unit.
-     */
-    private double legacyServingWeightGrams(DietFood food, String unit) {
-        for (AlimentoServingDTO serving : parseServings(food.getServingsJson())) {
-            if (serving.description() != null
-                    && serving.description().trim().equalsIgnoreCase(unit.trim())) {
-                if (serving.amountGrams() != null && serving.amountGrams() > 0) {
-                    return serving.amountGrams();
-                }
-                break;
-            }
-        }
-        Double defaultGrams = food.getDefaultServingGrams();
-        if (defaultGrams != null && defaultGrams > 0) {
-            return defaultGrams;
-        }
-        Double servingGrams = food.getServingAmountGrams();
-        if (servingGrams != null && servingGrams > 0) {
-            return servingGrams;
-        }
-        return 1.0; // comportamento legado: mantém o valor informado
-    }
 
     private String serializeServings(List<AlimentoServingDTO> servings) {
         if (servings == null || servings.isEmpty()) {

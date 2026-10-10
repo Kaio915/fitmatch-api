@@ -1,6 +1,7 @@
 package fitmatch_api.service;
 
 import fitmatch_api.dto.AlimentoDTO;
+import fitmatch_api.dto.AlimentoServingDTO;
 import fitmatch_api.model.TacoFood;
 import fitmatch_api.repository.TacoFoodRepository;
 import org.slf4j.Logger;
@@ -49,11 +50,21 @@ public class FoodSearchService {
     }
 
     private AlimentoDTO toAlimentoDTO(TacoFood food) {
-        // A TACO descreve a composição sempre por 100 g (base_qty), ou seja, não
-        // possui um "peso de porção/unidade" oficial. Por isso `servingAmountGrams`
-        // e `defaultServingGrams` ficam nulos: assim, unidades do tipo "unidade(s)",
-        // "porção" e "fatia(s)" caem no fallback seguro (50 g) no cálculo, em vez de
-        // multiplicar por 100 g e inflar as calorias.
+        // A TACO descreve a composição sempre por 100 g (base_qty). A medida caseira
+        // oficial é "100 g", portanto a porção real tem peso de 100 g — sem nenhum
+        // chute de peso. Assim, "g" e "ml" seguem 1:1 e a porção padrão usa 100 g.
+        double baseQty = food.getBaseQty() != null && food.getBaseQty() > 0 ? food.getBaseQty() : 100.0;
+        String servingDescription = formatTacoServing(baseQty) + " g";
+        AlimentoServingDTO serving = new AlimentoServingDTO(
+                servingDescription,
+                baseQty,
+                "g",
+                null,
+                null,
+                null,
+                null,
+                true
+        );
         return new AlimentoDTO(
                 food.getDescription(),
                 round1(val(food.getCalories())),
@@ -63,12 +74,19 @@ public class FoodSearchService {
                 null,
                 null,
                 "TACO",
-                "100 g",
-                null,
+                servingDescription,
+                baseQty,
                 "g",
-                List.of(),
-                null
+                List.of(serving),
+                baseQty
         );
+    }
+
+    private static String formatTacoServing(double baseQty) {
+        if (baseQty == Math.rint(baseQty)) {
+            return String.valueOf((long) baseQty);
+        }
+        return String.valueOf(baseQty);
     }
 
     private static double val(Double value) {
