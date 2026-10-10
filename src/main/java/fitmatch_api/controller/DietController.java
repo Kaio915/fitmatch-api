@@ -835,17 +835,19 @@ public class DietController {
     }
 
     /**
-     * Extrai o volume em ml de uma unidade de recipiente customizada, codificada
-     * como "recipiente|&lt;tipo&gt;|&lt;volumeMl&gt;" (ex.: "recipiente|copo|200").
-     * Quando o volume não pode ser lido, retorna 1.0 (1 recipiente = 1 g).
+     * Extrai o valor numérico embutido em uma unidade codificada no formato
+     * "&lt;prefixo&gt;|&lt;tipo&gt;|&lt;valor&gt;". É usado tanto para o volume em ml de
+     * recipientes líquidos ("recipiente|copo|200") quanto para o peso em gramas
+     * de medidas caseiras sólidas ("medida|concha|130").
+     * Quando o valor não pode ser lido, retorna 1.0.
      */
-    private double containerVolumeMl(String normalizedUnit) {
+    private double encodedAmountGrams(String normalizedUnit) {
         String[] parts = normalizedUnit.split("\\|");
         if (parts.length >= 3) {
             try {
-                double ml = Double.parseDouble(parts[2].replace(',', '.'));
-                if (ml > 0) {
-                    return ml;
+                double value = Double.parseDouble(parts[2].replace(',', '.'));
+                if (value > 0) {
+                    return value;
                 }
             } catch (NumberFormatException ignored) {
                 // fallback para o retorno seguro abaixo
@@ -862,9 +864,15 @@ public class DietController {
     private double weightPerUnitInGrams(DietFood food, String unit) {
         String normalized = normalizeUnit(unit);
         if (normalized.startsWith("recipiente|")) {
-            // Recipiente customizado (copo/caixinha/garrafinha): o peso
+            // Recipiente customizado (copo/caixinha/garrafinha/lata): o peso
             // unitário é o volume em ml informado (1 ml ≈ 1 g para líquidos).
-            return containerVolumeMl(normalized);
+            return encodedAmountGrams(normalized);
+        }
+        if (normalized.startsWith("medida|")) {
+            // Medida caseira sólida codificada como "medida|<token>|<pesoGrams>"
+            // (ex.: "medida|concha|130"). O peso unitário é o valor embutido,
+            // já resolvido pelo frontend (peso fixo ou peso oficial da porção).
+            return encodedAmountGrams(normalized);
         }
         switch (normalized) {
             case "g":
