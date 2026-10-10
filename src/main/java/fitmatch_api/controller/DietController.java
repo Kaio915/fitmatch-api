@@ -383,6 +383,8 @@ public class DietController {
             item.setFoodId(itemDto.foodId());
             item.setFoodName(foodName);
             item.setQuantityGrams(quantity);
+            item.setUnit(normalizeUnit(itemDto.unit()));
+            item.setDefaultServingGrams(itemDto.defaultServingGrams());
             item.setCalories(calories);
             item.setProtein(protein);
             item.setCarbs(carbs);
@@ -431,6 +433,7 @@ public class DietController {
             entry.setFoodId(food.getId());
             entry.setMealType(targetMealType);
             entry.setQuantityGrams(templateItem.getQuantityGrams());
+            entry.setUnit(normalizeUnit(templateItem.getUnit()));
             entry.setEntryDate(entryDate);
             entryRepo.save(entry);
             appliedCount++;
@@ -750,6 +753,8 @@ public class DietController {
                             row.put("foodId", item.getFoodId());
                             row.put("foodName", item.getFoodName());
                             row.put("quantityGrams", round1(safe(item.getQuantityGrams())));
+                            row.put("unit", item.getUnit());
+                            row.put("defaultServingGrams", item.getDefaultServingGrams());
                             row.put("calories", round1(safe(item.getCalories())));
                             row.put("protein", round1(safe(item.getProtein())));
                             row.put("carbs", round1(safe(item.getCarbs())));
@@ -784,8 +789,10 @@ public class DietController {
         }
 
         double quantity = safe(templateItem.getQuantityGrams());
-        if (quantity <= 0) quantity = 100.0;
-        double factor = 100.0 / quantity;
+        if (quantity <= 0) quantity = 1.0;
+        double grams = quantity * weightPerUnitForSavedItem(templateItem);
+        if (grams <= 0) grams = 100.0;
+        double factor = 100.0 / grams;
 
         double caloriesPer100g = safe(templateItem.getCalories()) * factor;
         if (caloriesPer100g <= 0) {
@@ -801,6 +808,7 @@ public class DietController {
         created.setFatPer100g(Math.max(0.0, safe(templateItem.getFat()) * factor));
         created.setFavorite(false);
         created.setCustom(false);
+        created.setDefaultServingGrams(templateItem.getDefaultServingGrams());
         return foodRepo.save(created);
     }
 
@@ -889,6 +897,30 @@ public class DietController {
             }
         }
         return officialDefaultServingGrams(food);
+    }
+
+    /**
+     * Peso (em gramas) de 1 unidade de um item de refeição salva, usado para
+     * recriar o alimento quando ele não existe mais no cadastro do usuário.
+     * Lê o valor embutido nas unidades codificadas ("recipiente|...", "medida|...",
+     * "porcao|...") e, para unidades legadas, usa o {@code defaultServingGrams}
+     * preservado no template. Sem informação, retorna 1.0 (comportamento neutro).
+     */
+    private double weightPerUnitForSavedItem(DietSavedMealItem item) {
+        String unit = normalizeUnit(item.getUnit());
+        if (unit.startsWith("recipiente|")
+                || unit.startsWith("medida|")
+                || unit.startsWith("porcao|")) {
+            return encodedAmountGrams(unit);
+        }
+        if ("g".equals(unit) || "ml".equals(unit)) {
+            return 1.0;
+        }
+        Double defaultGrams = item.getDefaultServingGrams();
+        if (defaultGrams != null && defaultGrams > 0) {
+            return defaultGrams;
+        }
+        return 1.0;
     }
 
     /**
@@ -993,7 +1025,9 @@ public class DietController {
             Double calories,
             Double protein,
             Double carbs,
-            Double fat
+            Double fat,
+            String unit,
+            Double defaultServingGrams
     ) {}
 
     public record SavedMealUpsertDto(String name, List<SavedMealItemDto> items) {}

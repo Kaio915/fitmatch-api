@@ -23,6 +23,12 @@ public class DietSavedMealItem {
     @Column(nullable = false)
     private Double quantityGrams;
 
+    @Column
+    private String unit;
+
+    @Column
+    private Double defaultServingGrams;
+
     @Column(nullable = false)
     private Double calories;
 
@@ -76,6 +82,22 @@ public class DietSavedMealItem {
 
     public void setQuantityGrams(Double quantityGrams) {
         this.quantityGrams = quantityGrams;
+    }
+
+    public String getUnit() {
+        return unit;
+    }
+
+    public void setUnit(String unit) {
+        this.unit = unit;
+    }
+
+    public Double getDefaultServingGrams() {
+        return defaultServingGrams;
+    }
+
+    public void setDefaultServingGrams(Double defaultServingGrams) {
+        this.defaultServingGrams = defaultServingGrams;
     }
 
     public Double getCalories() {
