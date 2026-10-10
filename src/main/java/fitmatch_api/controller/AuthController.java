@@ -7,6 +7,7 @@ import fitmatch_api.security.AuthContext;
 import fitmatch_api.security.JwtPrincipal;
 import fitmatch_api.security.JwtService;
 import fitmatch_api.service.CrefValidationService;
+import fitmatch_api.service.EmailService;
 import fitmatch_api.repository.BlockedStudentRepository;
 import fitmatch_api.repository.TrainerRatingRepository;
 import fitmatch_api.repository.UserRepository;
@@ -20,8 +21,12 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @RestController
@@ -36,6 +41,7 @@ public class AuthController {
     private final CrefValidationService crefValidationService;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final EmailService emailService;
 
     public AuthController(
             UserRepository repo,
@@ -43,7 +49,8 @@ public class AuthController {
             BlockedStudentRepository blockedStudentRepo,
             CrefValidationService crefValidationService,
             PasswordEncoder passwordEncoder,
-            JwtService jwtService
+            JwtService jwtService,
+            EmailService emailService
     ) {
         this.repo = repo;
         this.ratingRepo = ratingRepo;
@@ -51,6 +58,7 @@ public class AuthController {
         this.crefValidationService = crefValidationService;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.emailService = emailService;
     }
 
     // ================= LOGIN (JSON) =================
@@ -123,6 +131,96 @@ public class AuthController {
         }
 
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Status inválido");
+    }
+
+    // ================= ESQUECI MINHA SENHA =================
+
+    private static final Pattern EMAIL_PATTERN =
+            Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    private static final int RESET_CODE_EXPIRATION_MINUTES = 15;
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Map<String, String>> forgotPassword(@RequestBody ForgotPasswordRequest request) {
+        final String email = (request.email() == null) ? "" : request.email().trim();
+
+        if (email.isEmpty() || !EMAIL_PATTERN.matcher(email).matches()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe um e-mail válido");
+        }
+
+        User user = repo.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Nenhuma conta encontrada com este e-mail."));
+
+        if (isAccountBlockedForPasswordReset(user)) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Não é possível redefinir a senha pois esta conta encontra-se banida ou suspensa.");
+        }
+
+        String code = generateResetCode();
+        user.setResetPasswordCode(code);
+        user.setResetPasswordCodeExpiresAt(LocalDateTime.now().plusMinutes(RESET_CODE_EXPIRATION_MINUTES));
+        repo.save(user);
+
+        emailService.sendPasswordResetEmail(user, code);
+
+        Map<String, String> body = new HashMap<>();
+        body.put("message", "Código de recuperação enviado para o seu e-mail.");
+        return ResponseEntity.ok(body);
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Map<String, String>> resetPassword(@RequestBody ResetPasswordRequest request) {
+        final String email = (request.email() == null) ? "" : request.email().trim();
+        final String code = (request.code() == null) ? "" : request.code().trim();
+        final String newPassword = (request.newPassword() == null) ? "" : request.newPassword().trim();
+
+        if (email.isEmpty() || code.isEmpty() || newPassword.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Preencha e-mail, código e nova senha");
+        }
+
+        User user = repo.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Nenhuma conta encontrada com este e-mail."));
+
+        if (isAccountBlockedForPasswordReset(user)) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Não é possível redefinir a senha pois esta conta encontra-se banida ou suspensa.");
+        }
+
+        if (user.getResetPasswordCode() == null || user.getResetPasswordCode().isBlank()
+                || !user.getResetPasswordCode().equals(code)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Código de recuperação inválido");
+        }
+
+        if (user.getResetPasswordCodeExpiresAt() == null
+                || user.getResetPasswordCodeExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Código de recuperação expirado");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setResetPasswordCode(null);
+        user.setResetPasswordCodeExpiresAt(null);
+        repo.save(user);
+
+        Map<String, String> body = new HashMap<>();
+        body.put("message", "Senha alterada com sucesso");
+        return ResponseEntity.ok(body);
+    }
+
+    private boolean isAccountBlockedForPasswordReset(User user) {
+        return user.isBanned()
+                || user.getStatus() == null
+                || user.getStatus() == UserStatus.REJECTED;
+    }
+
+    private String generateResetCode() {
+        int code = 100000 + SECURE_RANDOM.nextInt(900000);
+        return String.valueOf(code);
     }
 
     private boolean passwordMatchesAndUpgradeIfLegacy(User user, String rawPassword) {
@@ -509,6 +607,10 @@ public class AuthController {
 
     // ================= DTOs =================
     public record LoginRequest(String email, String password, String type) {}
+
+    public record ForgotPasswordRequest(String email) {}
+
+    public record ResetPasswordRequest(String email, String code, String newPassword) {}
 
     public record AuthResponse(
             Long id,

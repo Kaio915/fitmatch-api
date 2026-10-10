@@ -15,6 +15,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import java.util.ArrayList;
@@ -143,6 +146,30 @@ public class EmailService {
         boolean sent = send(user.getEmail(), "FitMatch - Conta excluída", body);
         if (!sent) {
             log.warn("Falha ao enviar e-mail de exclusão para {}.", user.getEmail());
+        }
+    }
+
+    @Async("emailTaskExecutor")
+    public void sendPasswordResetEmail(User user, String code) {
+        if (user == null || user.getEmail() == null || user.getEmail().isBlank()) {
+            log.warn("Não foi possível enviar e-mail de recuperação: usuário sem endereço de e-mail.");
+            return;
+        }
+
+        if (!enabled) {
+            log.info("Envio de e-mail desabilitado (app.mail.enabled=false). "
+                    + "[DEV] Código de recuperação de senha para {}: {}", user.getEmail(), code);
+            return;
+        }
+
+        String name = user.getName() == null ? "" : user.getName().trim();
+        String greeting = name.isEmpty() ? "usuário(a)" : name;
+
+        String html = buildPasswordResetHtml(greeting, code);
+        boolean sent = sendHtml(user.getEmail(), "FitMatch - Código de recuperação de senha", html);
+        if (!sent) {
+            log.warn("Falha ao enviar e-mail de recuperação de senha para {}. "
+                    + "[DEV] Código de recuperação: {}", user.getEmail(), code);
         }
     }
 
@@ -353,6 +380,75 @@ public class EmailService {
             log.warn("Falha ao enviar e-mail para {}: {}", to, e.getMessage());
             return false;
         }
+    }
+
+    private boolean sendHtml(String to, String subject, String html) {
+        JavaMailSender sender = mailSenderProvider.getIfAvailable();
+        if (sender == null) {
+            log.warn("Não foi possível enviar e-mail HTML: JavaMailSender não configurado (defina spring.mail.*).");
+            return false;
+        }
+
+        try {
+            MimeMessage mime = sender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mime, true, "UTF-8");
+            helper.setFrom(from);
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(html, true);
+            sender.send(mime);
+            log.info("E-mail HTML enviado com sucesso para {}", to);
+            return true;
+        } catch (MessagingException | MailException e) {
+            log.warn("Falha ao enviar e-mail HTML para {}: {}", to, e.getMessage());
+            return false;
+        }
+    }
+
+    private String buildPasswordResetHtml(String greeting, String code) {
+        return "<!DOCTYPE html>"
+            + "<html lang=\"pt-BR\">"
+            + "<head>"
+            + "<meta charset=\"UTF-8\" />"
+            + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />"
+            + "</head>"
+            + "<body style=\"margin:0;padding:0;background-color:#F4F7FB;font-family:Helvetica,Arial,sans-serif;\">"
+            + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#F4F7FB;padding:24px 0;\">"
+            + "<tr><td align=\"center\">"
+            + "<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" "
+            + "style=\"max-width:480px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;\">"
+            + "<tr><td style=\"background-color:#0B4DBA;padding:24px 32px;\">"
+            + "<h1 style=\"margin:0;color:#ffffff;font-size:22px;font-weight:bold;\">FitMatch</h1>"
+            + "</td></tr>"
+            + "<tr><td style=\"padding:32px;\">"
+            + "<p style=\"margin:0 0 16px;font-size:16px;color:#1F2937;\">Olá, " + escapeHtml(greeting) + "!</p>"
+            + "<p style=\"margin:0 0 16px;font-size:15px;color:#4B5563;line-height:1.6;\">"
+            + "Recebemos uma solicitação para redefinir a sua senha. Utilize o código abaixo para concluir a alteração:</p>"
+            + "<div style=\"text-align:center;margin:24px 0;\">"
+            + "<span style=\"display:inline-block;font-size:32px;font-weight:bold;letter-spacing:8px;color:#0B4DBA;"
+            + "background-color:#EDF3FF;padding:12px 24px;border-radius:8px;\">" + code + "</span>"
+            + "</div>"
+            + "<p style=\"margin:0 0 8px;font-size:14px;color:#4B5563;line-height:1.6;\">"
+            + "Este código é válido por <strong>15 minutos</strong>. Se você não solicitou a redefinição de senha, "
+            + "ignore este e-mail.</p>"
+            + "</td></tr>"
+            + "<tr><td style=\"padding:16px 32px;background-color:#F9FAFB;border-top:1px solid #E5E7EB;\">"
+            + "<p style=\"margin:0;font-size:12px;color:#9CA3AF;\">Atenciosamente,<br/>Equipe FitMatch</p>"
+            + "</td></tr>"
+            + "</table>"
+            + "</td></tr>"
+            + "</table>"
+            + "</body>"
+            + "</html>";
+    }
+
+    private String escapeHtml(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     /**

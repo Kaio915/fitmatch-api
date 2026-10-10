@@ -61,6 +61,18 @@ public class User {
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean banned = false;
 
+    // ================= RECUPERAÇÃO DE SENHA =================
+
+    // Código numérico de 6 dígitos usado para redefinir a senha.
+    @JsonIgnore
+    @Column(length = 6)
+    private String resetPasswordCode;
+
+    // Data/hora em que o código de recuperação expira (15 minutos após a geração).
+    @JsonIgnore
+    @Column
+    private LocalDateTime resetPasswordCodeExpiresAt;
+
     // ================= CAMPOS DO ALUNO =================
 
     @Column(columnDefinition = "TEXT")
@@ -140,6 +152,16 @@ public class User {
 
     public boolean isBanned() {
         return banned;
+    }
+
+    @JsonIgnore
+    public String getResetPasswordCode() {
+        return resetPasswordCode;
+    }
+
+    @JsonIgnore
+    public LocalDateTime getResetPasswordCodeExpiresAt() {
+        return resetPasswordCodeExpiresAt;
     }
 
     public String getObjetivos() {
@@ -226,6 +248,14 @@ public class User {
 
     public void setBanned(boolean banned) {
         this.banned = banned;
+    }
+
+    public void setResetPasswordCode(String resetPasswordCode) {
+        this.resetPasswordCode = resetPasswordCode;
+    }
+
+    public void setResetPasswordCodeExpiresAt(LocalDateTime resetPasswordCodeExpiresAt) {
+        this.resetPasswordCodeExpiresAt = resetPasswordCodeExpiresAt;
     }
 
     public void setObjetivos(String objetivos) {
