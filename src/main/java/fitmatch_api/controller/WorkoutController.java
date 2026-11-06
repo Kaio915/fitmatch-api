@@ -1,5 +1,7 @@
 package fitmatch_api.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import fitmatch_api.model.StudentWorkoutPlan;
 import fitmatch_api.model.WorkoutCustomExercise;
 import fitmatch_api.model.WorkoutFavorite;
@@ -23,6 +25,7 @@ import java.util.stream.Collectors;
 public class WorkoutController {
 
     private static final String PLAN_SLOT_SEPARATOR = "||";
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final StudentWorkoutPlanRepository workoutPlanRepo;
     private final WorkoutFavoriteRepository favoriteRepo;
@@ -310,6 +313,7 @@ public class WorkoutController {
         plan.setTrainerId(trainerId);
         plan.setStudentId(studentId);
         plan.setDayName(storedDay);
+        plan.setName(normalizePlanName(dto.name(), dayName));
         plan.setExercisesJson(writeExercisesJson(exercises));
 
         return toPlanPayload(workoutPlanRepo.save(plan));
@@ -344,6 +348,7 @@ public class WorkoutController {
         updated.setTrainerId(trainerId);
         updated.setStudentId(studentId);
         updated.setDayName(storedDay);
+        updated.setName(normalizePlanName(dto.name(), dayName));
         updated.setExercisesJson(writeExercisesJson(exercises));
 
         return toPlanPayload(workoutPlanRepo.save(updated));
@@ -360,6 +365,37 @@ public class WorkoutController {
         StudentWorkoutPlan plan = workoutPlanRepo.findByIdAndTrainerIdAndStudentId(planId, trainerId, studentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Treino do aluno não encontrado"));
         workoutPlanRepo.delete(plan);
+    }
+
+    @PostMapping("/trainer/{trainerId}/students/{studentId}/plans/{planId}/clone")
+    public Map<String, Object> cloneStudentPlan(
+            @PathVariable Long trainerId,
+            @PathVariable Long studentId,
+            @PathVariable Long planId,
+            @RequestBody DayPlanCloneDto dto
+    ) {
+        AuthContext.requireSelfOrAdmin(trainerId);
+        ensureApprovedPair(trainerId, studentId);
+        StudentWorkoutPlan source = workoutPlanRepo
+                .findByIdAndTrainerIdAndStudentId(planId, trainerId, studentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Treino do aluno não encontrado"));
+
+        String dayName = normalizeAndValidateDay(dto.dayName());
+        String time = normalizeAndValidateTime(dto.time());
+        String storedDay = buildStoredDayValue(dayName, time);
+        Optional<StudentWorkoutPlan> existing = workoutPlanRepo
+                .findByTrainerIdAndStudentIdAndDayName(trainerId, studentId, storedDay);
+        if (existing.isPresent()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um treino neste dia e horário");
+        }
+
+        StudentWorkoutPlan clone = new StudentWorkoutPlan();
+        clone.setTrainerId(trainerId);
+        clone.setStudentId(studentId);
+        clone.setDayName(storedDay);
+        clone.setName(normalizePlanName(dto.name(), dayName));
+        clone.setExercisesJson(source.getExercisesJson() == null ? "[]" : source.getExercisesJson());
+        return toPlanPayload(workoutPlanRepo.save(clone));
     }
 
     @GetMapping("/student/{studentId}/trainer/{trainerId}/plans")
@@ -478,6 +514,13 @@ public class WorkoutController {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Dia inválido para treino");
     }
 
+    private String normalizePlanName(String rawName, String fallbackDay) {
+        if (rawName != null && !rawName.isBlank()) {
+            return rawName.trim();
+        }
+        return "Treino " + fallbackDay;
+    }
+
     private String normalizeAndValidateTime(String rawTime) {
         if (rawTime == null || rawTime.isBlank()) {
             return "";
@@ -558,6 +601,9 @@ public class WorkoutController {
             if (exercise == null) continue;
             String name = exercise.name() == null ? "" : exercise.name().trim();
             String category = exercise.category() == null ? "Outros" : exercise.category().trim();
+            String sets = exercise.sets() == null ? "" : exercise.sets().trim();
+            String reps = exercise.reps() == null ? "" : exercise.reps().trim();
+            String tempo = exercise.tempo() == null ? "" : exercise.tempo().trim();
             if (name.isEmpty()) continue;
             if (category.isEmpty()) category = "Outros";
 
@@ -566,10 +612,13 @@ public class WorkoutController {
                 continue;
             }
 
-            result.add(Map.of(
-                    "name", name,
-                    "category", category
-            ));
+            Map<String, String> item = new LinkedHashMap<>();
+            item.put("name", name);
+            item.put("category", category);
+            if (!sets.isEmpty()) item.put("sets", sets);
+            if (!reps.isEmpty()) item.put("reps", reps);
+            if (!tempo.isEmpty()) item.put("tempo", tempo);
+            result.add(item);
         }
 
         if (result.isEmpty()) {
@@ -585,6 +634,9 @@ public class WorkoutController {
             Map<String, String> exercise = exercises.get(i);
             String name = escapeJson(exercise.getOrDefault("name", ""));
             String category = escapeJson(exercise.getOrDefault("category", "Outros"));
+            String sets = escapeJson(exercise.getOrDefault("sets", ""));
+            String reps = escapeJson(exercise.getOrDefault("reps", ""));
+            String tempo = escapeJson(exercise.getOrDefault("tempo", ""));
             if (i > 0) {
                 sb.append(',');
             }
@@ -592,7 +644,17 @@ public class WorkoutController {
                     .append(name)
                     .append("\",\"category\":\"")
                     .append(category)
-                    .append("\"}");
+                    .append("\"");
+            if (!sets.isEmpty()) {
+                sb.append(",\"sets\":\"").append(sets).append("\"");
+            }
+            if (!reps.isEmpty()) {
+                sb.append(",\"reps\":\"").append(reps).append("\"");
+            }
+            if (!tempo.isEmpty()) {
+                sb.append(",\"tempo\":\"").append(tempo).append("\"");
+            }
+            sb.append("}");
         }
         sb.append(']');
         return sb.toString();
@@ -606,40 +668,46 @@ public class WorkoutController {
         List<Map<String, String>> parsed = new ArrayList<>();
         Set<String> seen = new HashSet<>();
 
-        Matcher nameCategoryMatcher = EXERCISE_PATTERN_NAME_CATEGORY.matcher(exercisesJson);
-        while (nameCategoryMatcher.find()) {
-            String name = nameCategoryMatcher.group(1).trim();
-            String category = nameCategoryMatcher.group(2).trim();
-            if (name.isEmpty()) continue;
-            if (category.isEmpty()) category = "Outros";
-            String key = normalizeText(name) + "|" + normalizeText(category);
-            if (!seen.add(key)) continue;
-            parsed.add(Map.of("name", name, "category", category));
-        }
-
-        Matcher categoryNameMatcher = EXERCISE_PATTERN_CATEGORY_NAME.matcher(exercisesJson);
-        while (categoryNameMatcher.find()) {
-            String category = categoryNameMatcher.group(1).trim();
-            String name = categoryNameMatcher.group(2).trim();
-            if (name.isEmpty()) continue;
-            if (category.isEmpty()) category = "Outros";
-            String key = normalizeText(name) + "|" + normalizeText(category);
-            if (!seen.add(key)) continue;
-            parsed.add(Map.of("name", name, "category", category));
-        }
-
-        if (parsed.isEmpty()) {
-            Matcher nameOnlyMatcher = EXERCISE_PATTERN_NAME_ONLY.matcher(exercisesJson);
-            while (nameOnlyMatcher.find()) {
-                String name = nameOnlyMatcher.group(1).trim();
-                if (name.isEmpty()) continue;
-                String key = normalizeText(name) + "|outros";
-                if (!seen.add(key)) continue;
-                parsed.add(Map.of("name", name, "category", "Outros"));
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(exercisesJson);
+            if (root == null || !root.isArray()) {
+                return List.of();
             }
+
+            for (JsonNode node : root) {
+                String name = textOf(node, "name");
+                String category = textOf(node, "category");
+                String sets = textOf(node, "sets");
+                String reps = textOf(node, "reps");
+                String tempo = textOf(node, "tempo");
+
+                if (name.isEmpty()) continue;
+                if (category.isEmpty()) category = "Outros";
+
+                String key = normalizeText(name) + "|" + normalizeText(category);
+                if (!seen.add(key)) continue;
+
+                Map<String, String> item = new LinkedHashMap<>();
+                item.put("name", name);
+                item.put("category", category);
+                if (!sets.isEmpty()) item.put("sets", sets);
+                if (!reps.isEmpty()) item.put("reps", reps);
+                if (!tempo.isEmpty()) item.put("tempo", tempo);
+                parsed.add(item);
+            }
+        } catch (Exception ignored) {
+            return List.of();
         }
 
         return parsed;
+    }
+
+    private String textOf(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        if (value == null || value.isNull()) {
+            return "";
+        }
+        return value.asText().trim();
     }
 
     private String escapeJson(String text) {
@@ -674,6 +742,7 @@ public class WorkoutController {
         payload.put("studentId", plan.getStudentId());
         payload.put("dayName", displayDayName);
         payload.put("time", displayTime);
+        payload.put("name", plan.getName());
         payload.put("exercises", readExercisesJson(plan.getExercisesJson()));
         payload.put("createdAt", plan.getCreatedAt());
         payload.put("updatedAt", plan.getUpdatedAt());
@@ -699,7 +768,7 @@ public class WorkoutController {
         return normalized;
     }
 
-    record ExerciseDto(String name, String category) {
+    record ExerciseDto(String name, String category, String sets, String reps, String tempo) {
     }
 
     record FavoriteUpsertDto(String name, List<ExerciseDto> exercises) {
@@ -708,7 +777,10 @@ public class WorkoutController {
     record CloneFavoriteDto(String name) {
     }
 
-    record DayPlanUpsertDto(String dayName, String time, List<ExerciseDto> exercises) {
+    record DayPlanUpsertDto(String dayName, String time, String name, List<ExerciseDto> exercises) {
+    }
+
+    record DayPlanCloneDto(String dayName, String time, String name) {
     }
 
     record CustomExerciseUpsertDto(String name, String category) {

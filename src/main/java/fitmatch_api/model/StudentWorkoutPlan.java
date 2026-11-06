@@ -24,6 +24,9 @@ public class StudentWorkoutPlan {
     @Column(nullable = false)
     private String dayName;
 
+    @Column
+    private String name;
+
     @Column(nullable = false, columnDefinition = "TEXT")
     private String exercisesJson;
 
@@ -74,6 +77,14 @@ public class StudentWorkoutPlan {
 
     public void setDayName(String dayName) {
         this.dayName = dayName;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 
     public String getExercisesJson() {

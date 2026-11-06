@@ -195,7 +195,10 @@ public class EmailService {
         String requester = studentName == null || studentName.isBlank() ? "Um aluno" : studentName.trim();
         String planLabel = "SEMANAL".equalsIgnoreCase(planType)
             ? "Plano semanal"
-            : "MENSAL".equalsIgnoreCase(planType) ? "Plano mensal" : "Plano diário";
+            : "MENSAL".equalsIgnoreCase(planType) ? "Plano mensal"
+            : "SEMESTRAL".equalsIgnoreCase(planType) ? "Plano semestral"
+            : "ANUAL".equalsIgnoreCase(planType) ? "Plano anual"
+            : "Plano diário";
 
         StringBuilder body = new StringBuilder();
         body.append("Olá, ").append(trainerName).append("!\n\n")
@@ -206,14 +209,14 @@ public class EmailService {
         List<Map<String, String>> emailSlots = slots == null
             ? new ArrayList<>()
             : new ArrayList<>(slots);
-        if ("MENSAL".equalsIgnoreCase(planType) && emailSlots.size() > 1) {
+        if (isRecurringWeeklyPlanType(planType) && emailSlots.size() > 1) {
             Map<String, String> firstSlot = emailSlots.get(0);
             Set<String> displayedPatterns = new HashSet<>();
             LocalDateTime firstAt = resolveSlotDateTime(firstSlot, LocalDateTime.now());
             LocalDateTime windowEnd = firstAt == null
                 ? null
                 : LocalDateTime.of(
-                    firstAt.toLocalDate().plusMonths(1).minusDays(1),
+                    recurringWindowEndDate(firstAt.toLocalDate(), planType),
                     LocalTime.MAX
                 );
             Map<String, String> lastSlot = firstSlot;
@@ -485,5 +488,21 @@ public class EmailService {
         sb.append("Assim que você reenviar, o seu cadastro voltará para a análise do administrador.\n\n");
         sb.append("Atenciosamente,\nEquipe FitMatch");
         return sb.toString();
+    }
+
+    private static boolean isRecurringWeeklyPlanType(String planType) {
+        return "MENSAL".equalsIgnoreCase(planType)
+                || "SEMESTRAL".equalsIgnoreCase(planType)
+                || "ANUAL".equalsIgnoreCase(planType);
+    }
+
+    private static LocalDate recurringWindowEndDate(LocalDate start, String planType) {
+        if ("SEMESTRAL".equalsIgnoreCase(planType)) {
+            return start.plusMonths(6).minusDays(1);
+        }
+        if ("ANUAL".equalsIgnoreCase(planType)) {
+            return start.plusYears(1).minusDays(1);
+        }
+        return start.plusMonths(1).minusDays(1);
     }
 }

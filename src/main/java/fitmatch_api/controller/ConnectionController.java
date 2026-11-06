@@ -290,7 +290,10 @@ public class ConnectionController {
             return false;
         }
         String planType = req.getPlanType().trim();
-        return "SEMANAL".equalsIgnoreCase(planType) || "MENSAL".equalsIgnoreCase(planType);
+        return "SEMANAL".equalsIgnoreCase(planType)
+                || "MENSAL".equalsIgnoreCase(planType)
+                || "SEMESTRAL".equalsIgnoreCase(planType)
+                || "ANUAL".equalsIgnoreCase(planType);
     }
 
     private String buildStoredOnceDay(String dayName, String dateIso) {

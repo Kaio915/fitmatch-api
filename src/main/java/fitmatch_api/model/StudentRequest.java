@@ -41,12 +41,12 @@ public class StudentRequest {
     private String status = "PENDING";
 
     @Column
-    private String planType = "DIARIO"; // DIARIO, SEMANAL, MENSAL
+    private String planType = "DIARIO"; // DIARIO, SEMANAL, MENSAL, SEMESTRAL, ANUAL
 
     @Column(columnDefinition = "TEXT")
     private String daysJson; // JSON array [{"dayName":"...","time":"..."}] para planos recorrentes
 
-    // Datas (ISO "yyyy-MM-dd") em que um plano recorrente (MENSAL/SEMANAL) é
+    // Datas (ISO "yyyy-MM-dd") em que um plano recorrente (MENSAL/SEMANAL/SEMESTRAL/ANUAL) é
     // sobrescrito por uma solicitação DIARIO de outro aluno no mesmo dia da
     // semana + horário. Ex.: ["2026-09-25"].
     @Column(columnDefinition = "TEXT")

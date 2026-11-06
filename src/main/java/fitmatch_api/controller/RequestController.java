@@ -261,7 +261,7 @@ public class RequestController {
         }
 
         List<TrainerSlot> blockedSlots = slotRepo.findByTrainerId(trainerId);
-        boolean hasApprovedMonthlyBlock = isCoveredByApprovedMonthlyRequest(
+        boolean hasApprovedRecurringWeeklyBlock = isCoveredByApprovedRecurringWeeklyRequest(
                 trainerId,
                 selectedSlot,
                 selectedDay,
@@ -313,7 +313,7 @@ public class RequestController {
         if (hasOnceBlock) {
             return true;
         }
-        if (hasApprovedMonthlyBlock && !hasOnceUnblock) {
+        if (hasApprovedRecurringWeeklyBlock && !hasOnceUnblock) {
             return true;
         }
         if (hasWeeklyBlock && hasOnceUnblock) {
@@ -322,7 +322,7 @@ public class RequestController {
         return hasWeeklyBlock;
     }
 
-    private boolean isCoveredByApprovedMonthlyRequest(
+    private boolean isCoveredByApprovedRecurringWeeklyRequest(
             Long trainerId,
             Map<String, String> selectedSlot,
             String selectedDay,
@@ -350,7 +350,8 @@ public class RequestController {
         );
 
         for (StudentRequest req : requestRepo.findByTrainerIdAndStatus(trainerId, "APPROVED")) {
-            if (!"MENSAL".equals(normalizePlanType(req.getPlanType()))) {
+            String reqPlanType = normalizePlanType(req.getPlanType());
+            if (!isRecurringWeeklyPlan(reqPlanType)) {
                 continue;
             }
 
@@ -374,12 +375,16 @@ public class RequestController {
                     continue;
                 }
 
+                LocalDateTime cycleEnd = switch (reqPlanType) {
+                    case "SEMESTRAL" -> slotStart.plusMonths(6).minusDays(1);
+                    case "ANUAL" -> slotStart.plusYears(1).minusDays(1);
+                    default -> slotStart.plusMonths(1).minusDays(1);
+                };
+
                 long daysFromFirstSession = ChronoUnit.DAYS.between(slotStart.toLocalDate(), selectedDate);
                 if (daysFromFirstSession >= 0
                         && daysFromFirstSession % 7 == 0
-                    && !selectedStart.isAfter(
-                        slotStart.plusMonths(1).minusDays(1)
-                    )) {
+                        && !selectedStart.isAfter(cycleEnd)) {
                     return true;
                 }
             }
@@ -444,10 +449,38 @@ public class RequestController {
         String normalized = rawPlanType.trim().toUpperCase(Locale.ROOT);
         if ("DIARIO".equals(normalized)
                 || "SEMANAL".equals(normalized)
-                || "MENSAL".equals(normalized)) {
+                || "MENSAL".equals(normalized)
+                || "SEMESTRAL".equals(normalized)
+                || "ANUAL".equals(normalized)) {
             return normalized;
         }
         return "DIARIO";
+    }
+
+    private boolean isRecurringWeeklyPlan(String planType) {
+        return "MENSAL".equals(planType)
+                || "SEMESTRAL".equals(planType)
+                || "ANUAL".equals(planType);
+    }
+
+    private String planDisplayName(String planType) {
+        return switch (planType) {
+            case "SEMANAL" -> "semanal";
+            case "MENSAL" -> "mensal";
+            case "SEMESTRAL" -> "semestral";
+            case "ANUAL" -> "anual";
+            default -> "diário";
+        };
+    }
+
+    private String planWindowDescription(String planType) {
+        return switch (planType) {
+            case "SEMANAL" -> "7 dias";
+            case "MENSAL" -> "1 mês";
+            case "SEMESTRAL" -> "6 meses";
+            case "ANUAL" -> "1 ano";
+            default -> "1 dia";
+        };
     }
 
     private LocalDateTime resolveSlotStartAt(Map<String, String> slot, LocalDateTime anchor) {
@@ -723,6 +756,18 @@ public class RequestController {
                     LocalTime.MAX
             );
         }
+        if ("SEMESTRAL".equals(planType)) {
+            return LocalDateTime.of(
+                    anchor.toLocalDate().plusMonths(6).minusDays(1),
+                    LocalTime.MAX
+            );
+        }
+        if ("ANUAL".equals(planType)) {
+            return LocalDateTime.of(
+                    anchor.toLocalDate().plusYears(1).minusDays(1),
+                    LocalTime.MAX
+            );
+        }
         return LocalDateTime.of(anchor.toLocalDate().plusDays(1), LocalTime.MAX);
     }
 
@@ -731,7 +776,7 @@ public class RequestController {
             String planType,
             LocalDateTime anchor
     ) {
-        if (!("SEMANAL".equals(planType) || "MENSAL".equals(planType))) {
+        if (!("SEMANAL".equals(planType) || isRecurringWeeklyPlan(planType))) {
             return;
         }
 
@@ -756,7 +801,7 @@ public class RequestController {
             return;
         }
 
-        if ("MENSAL".equals(planType)) {
+        if (isRecurringWeeklyPlan(planType)) {
             Set<String> selectedWeekdays = new HashSet<>();
             for (Map<String, String> slot : selectedSlots) {
                 String dayName = normalizeDayName(slot.getOrDefault("dayName", ""));
@@ -772,7 +817,7 @@ public class RequestController {
                 if (selectedWeekdays.size() > 7) {
                     throw new ResponseStatusException(
                             HttpStatus.BAD_REQUEST,
-                            "Plano mensal permite no máximo 7 dias da semana diferentes"
+                            "Plano " + planDisplayName(planType) + " permite no máximo 7 dias da semana diferentes"
                     );
                 }
             }
@@ -789,15 +834,9 @@ public class RequestController {
             }
 
             if (slotStart.isBefore(anchor) || slotStart.isAfter(windowEnd)) {
-                if ("SEMANAL".equals(planType)) {
-                    throw new ResponseStatusException(
-                            HttpStatus.BAD_REQUEST,
-                            "Plano semanal permite solicitar horários em até 7 dias"
-                    );
-                }
                 throw new ResponseStatusException(
                         HttpStatus.BAD_REQUEST,
-                        "Plano mensal permite solicitar horários em até 1 mês"
+                        "Plano " + planDisplayName(planType) + " permite solicitar horários em até " + planWindowDescription(planType)
                 );
             }
         }
@@ -1048,8 +1087,8 @@ public class RequestController {
         if (req == null || req.getPlanType() == null) {
             return false;
         }
-        String planType = req.getPlanType().trim();
-        return "SEMANAL".equalsIgnoreCase(planType) || "MENSAL".equalsIgnoreCase(planType);
+        String planType = req.getPlanType().trim().toUpperCase(Locale.ROOT);
+        return "SEMANAL".equals(planType) || isRecurringWeeklyPlan(planType);
     }
 
     private String buildStoredOnceDay(String dayName, String dateIso) {
@@ -1347,8 +1386,9 @@ public class RequestController {
     }
 
     // Ao aprovar um pedido, garante que um DIARIO (data específica) sobrescreva
-    // um MENSAL/SEMANAL recorrente no mesmo dia da semana + horário, e vice-versa,
-    // registrando a data sobrescrita no excludedDatesJson do plano recorrente.
+    // um plano recorrente semanal (MENSAL/SEMANAL/SEMESTRAL/ANUAL) no mesmo dia da
+    // semana + horário, e vice-versa, registrando a data sobrescrita no
+    // excludedDatesJson do plano recorrente.
     private void syncDailyOverridesOnApproval(StudentRequest req, String planType) {
         if (req == null) {
             return;
