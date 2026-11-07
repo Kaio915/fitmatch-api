@@ -32,16 +32,6 @@ public class WorkoutController {
     private final WorkoutCustomExerciseRepository customExerciseRepo;
     private final StudentRequestRepository requestRepo;
 
-    private static final Pattern EXERCISE_PATTERN_NAME_CATEGORY = Pattern.compile(
-            "\\{[^}]*\\\"name\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"[^}]*\\\"category\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"[^}]*\\}"
-    );
-    private static final Pattern EXERCISE_PATTERN_CATEGORY_NAME = Pattern.compile(
-            "\\{[^}]*\\\"category\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"[^}]*\\\"name\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"[^}]*\\}"
-    );
-    private static final Pattern EXERCISE_PATTERN_NAME_ONLY = Pattern.compile(
-            "\\{[^}]*\\\"name\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"[^}]*\\}"
-    );
-
     private static final Map<String, Integer> DAY_ORDER = Map.of(
             "Segunda", 1,
             "Terça", 2,

@@ -106,7 +106,7 @@ public class TacoDataImporter implements CommandLineRunner {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return "";
         }
-        return node.asText().trim();
+        return node.asString().trim();
     }
 
     private static double doubleOrZero(JsonNode node) {
@@ -116,7 +116,7 @@ public class TacoDataImporter implements CommandLineRunner {
         if (node.isNumber()) {
             return node.asDouble();
         }
-        String text = node.asText().trim();
+        String text = node.asString().trim();
         if (text.isEmpty()) {
             return 0.0;
         }

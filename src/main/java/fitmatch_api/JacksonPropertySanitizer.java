@@ -17,6 +17,10 @@ import java.util.Locale;
  * pois SerializationFeature.WRITE_DATES_AS_TIMESTAMPS foi removido dessa versão.
  * Envolve os PropertySources que contêm a chave inválida com uma versão filtrada.
  */
+// EnvironmentPostProcessor é @Deprecated(forRemoval=true) desde o Spring Boot 4.0
+// (remoção prevista no 4.2) e ainda não há substituto oficial — o próprio javadoc
+// aponta para a mesma interface. Suprimimos o aviso até o Spring fornecer alternativa.
+@SuppressWarnings("removal")
 public class JacksonPropertySanitizer implements EnvironmentPostProcessor {
 
     private static final List<String> INVALID_KEYS = List.of(
